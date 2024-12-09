@@ -588,20 +588,20 @@ class JekyllExportSettingTab extends PluginSettingTab {
 					})
 			);
 
-		// Image folder settings
-		containerEl.createEl("h2", { text: "Image Settings" });
-		new Setting(containerEl)
-			.setName("Image Folder")
-			.setDesc("Image storage path in Jekyll site")
-			.addText((text) =>
-				text
-					.setPlaceholder("assets/images")
-					.setValue(this.plugin.settings.imageFolder)
-					.onChange(async (value) => {
-						this.plugin.settings.imageFolder = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
+		// // Image folder settings
+		// containerEl.createEl("h2", { text: "Image Settings" });
+		// new Setting(containerEl)
+		// 	.setName("Image Folder")
+		// 	.setDesc("Image storage path in Jekyll site")
+		// 	.addText((text) =>
+		// 		text
+		// 			.setPlaceholder("assets/images")
+		// 			.setValue(this.plugin.settings.imageFolder)
+		// 			.onChange(async (value) => {
+		// 				this.plugin.settings.imageFolder = value.trim();
+		// 				await this.plugin.saveSettings();
+		// 			})
+		// 	);
 	}
 }
 
