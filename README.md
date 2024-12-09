@@ -1,76 +1,70 @@
 # Obsidian Jekyll Export
 
-Obsidian 노트를 Jekyll 블로그 포스트로 동기화하는 플러그인입니다.
+Obsidian의 마크다운 노트를 Jekyll 블로그 포스트로 변환하고 내보내는 플러그인입니다.
 
-## 기능
+## 주요 기능
 
-- Obsidian 노트를 Jekyll 포스트로 자동 변환
-- Obsidian의 폴더 구조를 Jekyll 사이트에 그대로 유지
-- Front Matter 자동 생성 및 변환
-- 위키링크를 마크다운 링크로 변환
-- 이미지 파일 자동 동기화
-- 파일 변경 시 자동 동기화 지원
+- Obsidian 마크다운 파일을 Jekyll 포스트 형식으로 변환
+- 파일 중복 시 처리 옵션 제공 (날짜/내용 덮어쓰기, 내용만 덮어쓰기)
+- Front Matter 자동 생성 및 관리
+- 위키링크(`[[링크]]`)를 마크다운 링크로 자동 변환
+- 이미지 링크 자동 변환 및 경로 관리
+- 다중 Jekyll 사이트 지원 (여러 대상 폴더 설정 가능)
 
 ## 설치 방법
 
-1. Obsidian 설정에서 Community Plugins를 열고 "Jekyll Export"를 검색합니다.
-2. 플러그인을 설치하고 활성화합니다.
-3. 설정에서 필요한 옵션을 구성합니다.
+1. Obsidian의 설정(Settings)에서 커뮤니티 플러그인을 엽니다
+2. "Jekyll Export"를 검색하여 설치합니다
+3. 플러그인을 활성화합니다
 
-## 설정 옵션
+## 설정 방법
 
 ### 기본 설정
-- Source Folder: Obsidian 노트를 가져올 폴더 경로
-- Target Folder: Jekyll 사이트의 루트 경로
-  - 예: Obsidian 경로가 `vault/folder/note.md`인 경우
-  - Jekyll 경로는 `jekyll-root/folder/_posts/note.md`로 변환됩니다.
 
-### 동기화 설정
-- Auto Sync: 파일 변경 시 자동 동기화 여부
-- 제외 패턴: 동기화에서 제외할 폴더나 파일 패턴
+1. **대상 폴더 설정**
+   - Jekyll 사이트의 루트 경로를 지정합니다
+   - 여러 개의 대상 폴더를 추가할 수 있습니다
+   - 활성 대상 폴더를 선택하여 내보내기 위치를 지정합니다
 
-### Front Matter 설정
-- Front Matter 템플릿: 새 문서에 적용할 기본 Front Matter 템플릿
+2. **Front Matter 설정**
+   - 기본 템플릿: 
+   ```yaml
+   ---
+   title: {{title}}
+   date: {{date}}
+   tags: []
+   ---
+   ```
+   - 사용자 정의 템플릿 설정 가능
 
-### 이미지 설정
-- 이미지는 Jekyll 사이트의 assets/images 폴더에 통합 저장됩니다.
+3. **이미지 설정**
+   - Jekyll 사이트 내 이미지 저장 경로 지정
+   - 기본값: `assets/images`
 
 ## 사용 방법
 
-1. 설정에서 Obsidian 소스 폴더와 Jekyll 루트 폴더를 지정합니다.
-2. 리본 메뉴의 업로드 아이콘을 클릭하여 수동으로 동기화하거나,
-3. 자동 동기화를 활성화하여 파일 변경 시 자동으로 동기화합니다.
+### 파일 내보내기
 
-## 폴더 구조 예시
+1. **리본 메뉴 사용**
+   - 상단 리본 메뉴의 업로드 아이콘 클릭
+   - 현재 열린 마크다운 파일을 Jekyll 포스트로 변환
 
-```
-Obsidian Vault:
-/vault
-  /programming
-    /python
-      note1.md
-  /blog
-    post1.md
+2. **컨텍스트 메뉴 사용**
+   - 파일에서 우클릭 > "Export to Jekyll" 선택
 
-Jekyll Site:
-/jekyll-site
-  /programming
-    /python
-      /_posts
-        YYYY-MM-DD-note1.md
-  /blog
-    /_posts
-      YYYY-MM-DD-post1.md
-  /assets
-    /images
-      image1.png
-```
+### 파일 중복 처리
+
+파일 중복 시 다음 옵션 중 선택:
+- **날짜와 내용 덮어쓰기**: 파일을 완전히 새로 생성
+- **내용만 덮어쓰기**: 기존 Front Matter 유지하고 내용만 업데이트
+- **취소**: 내보내기 취소
 
 ## 주의사항
 
-- 동기화 전에 반드시 중요한 파일을 백업하세요.
-- Jekyll 사이트의 구조와 설정에 따라 일부 기능이 다르게 동작할 수 있습니다.
-- 대용량 이미지 파일은 동기화 시간이 오래 걸릴 수 있습니다.
+- 내보내기 전 대상 폴더가 올바르게 설정되어 있는지 확인하세요
+- Jekyll 사이트의 `_posts` 디렉토리 구조가 자동으로 생성됩니다
+- 파일명은 Jekyll 형식(`YYYY-MM-DD-제목.md`)으로 자동 변환됩니다
+- 이미지 파일은 지정된 이미지 폴더로 자동 복사됩니다
 
 ## 라이선스
 
