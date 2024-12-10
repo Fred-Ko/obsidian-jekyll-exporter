@@ -83,6 +83,171 @@ const MODAL_CSS = `
 }
 `;
 
+// Constants 섹션에 새로운 CSS 추가
+const SETTINGS_CSS = `
+.jekyll-settings-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 24px;
+}
+
+.jekyll-settings-section {
+    background: var(--background-secondary);
+    border-radius: 12px;
+    padding: 24px 32px;
+    margin-bottom: 32px;
+}
+
+.jekyll-settings-section h2 {
+    margin: 0 0 24px 0;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--background-modifier-border);
+    color: var(--text-normal);
+    font-size: 1.8em;
+    font-weight: 600;
+}
+
+.folders-container {
+    background: var(--background-primary);
+    border-radius: 8px;
+    padding: 16px;
+    margin: 16px 0 24px 0;
+}
+
+.folder-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px !important;
+    margin-bottom: 8px !important;
+    background: var(--background-secondary);
+    border-radius: 4px !important;
+    transition: all 0.2s ease;
+}
+
+.folder-item:hover {
+    background: var(--background-modifier-hover);
+}
+
+.folder-path {
+    font-family: var(--font-monospace);
+    font-size: 0.9em !important;
+    color: var(--text-normal);
+    flex: 1;
+    margin-right: 16px;
+    word-break: break-all;
+}
+
+/* 새 폴더 추가 입력 필드 */
+.folder-input {
+    font-size: 14px !important;
+    padding: 8px 12px !important;
+    width: 100% !important;
+    background: var(--background-primary) !important;
+    box-sizing: border-box !important;
+}
+
+/* 드롭다운 스타일 */
+.folder-select {
+    width: 100% !important;
+    max-width: none !important;
+    padding: 8px 12px !important;
+    background: var(--background-primary) !important;
+    border-radius: 4px !important;
+    margin-top: 8px !important;
+    box-sizing: border-box !important;
+}
+
+/* Front Matter 텍스트 영역 */
+.front-matter-textarea {
+    width: 100% !important;
+    min-height: 200px !important;
+    font-family: var(--font-monospace) !important;
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+    padding: 16px !important;
+    background: var(--background-primary) !important;
+    border: 1px solid var(--background-modifier-border) !important;
+    border-radius: 8px !important;
+    resize: vertical !important;
+    box-sizing: border-box !important;
+}
+
+/* 설정 아이템 간격 조정 */
+.setting-item {
+    border: none;
+    padding: 16px 0;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: space-between !important;
+}
+
+.setting-item-info {
+    margin-bottom: 0 !important;
+    flex: 0 1 300px !important;
+}
+
+.setting-item-name {
+    font-size: 1.1em;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.setting-item-description {
+    font-size: 0.9em;
+    color: var(--text-muted);
+}
+
+/* 드롭다운과 입력 필드 컨테이너 */
+.setting-item-control {
+    width: 400px !important;
+    padding-right: 0 !important;
+    flex: 0 0 auto !important;
+}
+
+/* 모든 입력 필드에 대한 공통 스타일 */
+.setting-item input[type="text"] {
+    width: 100% !important;
+    font-size: 14px !important;
+    padding: 8px 12px !important;
+    background: var(--background-primary) !important;
+    border-radius: 4px !important;
+    box-sizing: border-box !important;
+}
+
+/* 버튼 스타일 */
+.jekyll-button {
+    padding: 4px 12px !important;
+    border-radius: 4px !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s ease !important;
+    background-color: var(--interactive-accent) !important;
+    color: var(--text-on-accent) !important;
+    min-height: 24px !important;
+    line-height: 1 !important;
+}
+
+.jekyll-button:hover {
+    opacity: 0.9;
+}
+
+.jekyll-button.danger {
+    background-color: var(--text-error) !important;
+}
+
+/* 반응형 조정 */
+@media screen and (max-width: 768px) {
+    .jekyll-settings-container {
+        padding: 16px;
+    }
+
+    .jekyll-settings-section {
+        padding: 20px;
+    }
+}
+`;
+
 // ========================= Enums =========================
 
 enum OverwriteChoice {
@@ -482,7 +647,7 @@ class JekyllExporter {
 	}
 
 	/**
-	 * 첨부된 이미지들을 Jekyll 이미지 폴더로 복사함.
+	 * 첨부된 이미지들을 Jekyll 이미지 폴더 복사함.
 	 * @param file 이미지가 포함된 TFile
 	 */
 	private async copyAttachedImages(file: TFile) {
@@ -541,87 +706,94 @@ class JekyllExportSettingTab extends PluginSettingTab {
 	// Display the settings UI
 	display(): void {
 		const { containerEl } = this;
-		if (!containerEl) {
-			console.error("containerEl이 초기화되지 않았습니다.");
-			return;
-		}
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Basic Settings" });
+		// 메인 컨테이너에 클래스 추가
+		containerEl.addClass('jekyll-settings-container');
 
-		// Target Folders setting
-		containerEl.createEl("h3", { text: "Target Folders" });
-		const foldersContainer = containerEl.createDiv("folders-container");
+		// 타겟 폴더 섹션
+		const targetSection = containerEl.createDiv('jekyll-settings-section');
+		targetSection.createEl('h2', { text: 'Target Folders' });
 
+		const foldersContainer = targetSection.createDiv('folders-container');
+
+		// 기존 폴더 목록 표시
 		this.plugin.settings.targetFolders.forEach((folder, index) => {
-			const folderDiv = foldersContainer.createDiv("folder-item");
+			const folderDiv = foldersContainer.createDiv('folder-item');
 
-			const folderSpan = folderDiv.createSpan({ text: folder });
-			folderSpan.style.marginRight = "8px";
+			const folderSpan = folderDiv.createSpan({
+				text: folder,
+				cls: 'folder-path'
+			});
 
-			new ButtonComponent(folderDiv)
+			const deleteBtn = new ButtonComponent(folderDiv)
 				.setButtonText(BUTTON_DELETE)
+				.setClass('jekyll-button')
+				.setClass('danger')
 				.onClick(async () => {
 					this.plugin.settings.targetFolders.splice(index, 1);
-					// Replace active folder if deleted
 					if (this.plugin.settings.activeTargetFolder === folder) {
-						this.plugin.settings.activeTargetFolder =
-							this.plugin.settings.targetFolders[0] || "";
+						this.plugin.settings.activeTargetFolder = this.plugin.settings.targetFolders[0] || '';
 					}
 					await this.plugin.saveSettings();
 					this.display();
 				});
 		});
 
-		// Add new folder
-		new Setting(containerEl)
-			.setName("Add New Target Folder")
-			.setDesc("Jekyll site root path (e.g., /path/to/jekyll/site)")
-			.addText((text) => {
+		// 새 폴더 추가 설정
+		new Setting(targetSection)
+			.setName('Add New Target Folder')
+			.setDesc('Jekyll site root path (e.g., /path/to/jekyll/site)')
+			.addText(text => {
 				this.newFolderInput = text;
-				text.setPlaceholder("/path/to/jekyll/site");
+				text.inputEl.addClass('folder-input');
+				text.setPlaceholder('/path/to/jekyll/site');
 			})
-			.addButton((button) => {
-				button.setButtonText(BUTTON_ADD).onClick(async () => {
-					const value = this.newFolderInput.getValue().trim();
-					if (
-						value &&
-						!this.plugin.settings.targetFolders.includes(value)
-					) {
-						try {
-							// Validate folder path
-							await fs.access(value);
-							this.plugin.settings.targetFolders.push(value);
-							// Activate the first added folder
-							if (
-								this.plugin.settings.targetFolders.length === 1
-							) {
-								this.plugin.settings.activeTargetFolder = value;
+			.addButton(button => {
+				button
+					.setButtonText(BUTTON_ADD)
+					.setClass('jekyll-button')
+					.onClick(async () => {
+						const value = this.newFolderInput.getValue().trim();
+						if (
+							value &&
+							!this.plugin.settings.targetFolders.includes(value)
+						) {
+							try {
+								// Validate folder path
+								await fs.access(value);
+								this.plugin.settings.targetFolders.push(value);
+								// Activate the first added folder
+								if (
+									this.plugin.settings.targetFolders.length === 1
+								) {
+									this.plugin.settings.activeTargetFolder = value;
+								}
+								await this.plugin.saveSettings();
+								this.newFolderInput.setValue("");
+								this.display();
+							} catch {
+								new Notice("Invalid folder path.");
 							}
-							await this.plugin.saveSettings();
-							this.newFolderInput.setValue("");
-							this.display();
-						} catch {
-							new Notice("Invalid folder path.");
+						} else {
+							new Notice("Folder already exists or is invalid.");
 						}
-					} else {
-						new Notice("Folder already exists or is invalid.");
-					}
-				});
+					});
 			});
 
-		// Active Target Folder selection
-		containerEl.createEl("h3", { text: "Active Target Folder" });
-		new Setting(containerEl)
-			.setName("Select Active Folder")
-			.setDesc("Choose the active target folder for exports.")
-			.addDropdown((dropdown) => {
-				this.plugin.settings.targetFolders.forEach((folder) => {
+		// 활성 폴더 선택 섹션
+		const activeSection = containerEl.createDiv('jekyll-settings-section');
+		activeSection.createEl('h2', { text: 'Active Target Folder' });
+
+		new Setting(activeSection)
+			.setName('Select Active Folder')
+			.setDesc('Choose the active target folder for exports.')
+			.addDropdown(dropdown => {
+				this.plugin.settings.targetFolders.forEach(folder => {
 					dropdown.addOption(folder, folder);
 				});
-				dropdown.setValue(
-					this.plugin.settings.activeTargetFolder || ""
-				);
+				dropdown.setValue(this.plugin.settings.activeTargetFolder || '');
+				dropdown.selectEl.addClass('folder-select');
 				dropdown.onChange(async (value) => {
 					// Validate selected folder
 					try {
@@ -635,35 +807,38 @@ class JekyllExportSettingTab extends PluginSettingTab {
 				});
 			});
 
-		// Front Matter settings
-		containerEl.createEl("h2", { text: "Front Matter Settings" });
-		new Setting(containerEl)
-			.setName("Front Matter Template")
-			.setDesc("Default Front Matter template for new documents")
-			.addTextArea((text) =>
-				text
-					.setPlaceholder(DEFAULT_FRONT_MATTER_TEMPLATE)
+		// Front Matter 섹션
+		const frontMatterSection = containerEl.createDiv('jekyll-settings-section');
+		frontMatterSection.createEl('h2', { text: 'Front Matter Settings' });
+
+		new Setting(frontMatterSection)
+			.setName('Front Matter Template')
+			.setDesc('Default Front Matter template for new documents')
+			.addTextArea(text => {
+				text.inputEl.addClass('front-matter-textarea');
+				text.setPlaceholder(DEFAULT_FRONT_MATTER_TEMPLATE)
 					.setValue(this.plugin.settings.frontMatterTemplate)
-					.onChange(async (value) => {
+					.onChange(async (value: string) => {
 						this.plugin.settings.frontMatterTemplate = value;
 						await this.plugin.saveSettings();
-					})
-			);
+					});
+			});
 
-		// Image folder settings
-		containerEl.createEl("h2", { text: "Image Settings" });
-		new Setting(containerEl)
-			.setName("Image Folder")
-			.setDesc("Image storage path in Jekyll site")
-			.addText((text) =>
-				text
-					.setPlaceholder("assets/img")
+		// 이미지 설정 섹션
+		const imageSection = containerEl.createDiv('jekyll-settings-section');
+		imageSection.createEl('h2', { text: 'Image Settings' });
+
+		new Setting(imageSection)
+			.setName('Image Folder')
+			.setDesc('Image storage path in Jekyll site')
+			.addText(text => {
+				text.setPlaceholder('assets/img')
 					.setValue(this.plugin.settings.imageFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.imageFolder = value.trim();
 						await this.plugin.saveSettings();
-					})
-			);
+					});
+			});
 	}
 }
 
@@ -675,8 +850,9 @@ export default class JekyllExportPlugin extends Plugin {
 	private exporter!: JekyllExporter;
 
 	async onload() {
-		// Inject CSS styles
+		// CSS 스타일 주입
 		injectStyles(MODAL_CSS);
+		injectStyles(SETTINGS_CSS);  // 새로운 CSS 추가
 
 		// Load settings
 		await this.loadSettings();
