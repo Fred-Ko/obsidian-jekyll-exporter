@@ -272,6 +272,9 @@ class JekyllExporter {
 			// Convert wiki links to markdown links
 			content = this.convertWikiLinks(content);
 
+			// Convert HTTP URLs to markdown links
+			content = this.convertHttpUrlsToLinks(content);
+
 			// Create Jekyll file name
 			const fileName = this.createJekyllFileName(file);
 			const relativeDir = path.dirname(file.path);
@@ -511,6 +514,15 @@ class JekyllExporter {
 			console.error("이미지 복사 중 에러 발생:", error);
 			new Notice("이미지 복사 중 오류가 발생했습니다.");
 		}
+	}
+
+	// 새로운 헬퍼 함수 수정: HTTP 주소를 마크다운 링크로 변환 (특정 조건 제외)
+	private convertHttpUrlsToLinks(content: string): string {
+		// URL 뒤에 오는 특수문자 제외 (예: 괄호, 마침표)
+		const urlRegex = /(https?:\/\/[^\s\)]+)/g;
+		return content.replace(urlRegex, (url) => {
+			return `[${url}](${url})`;
+		});
 	}
 }
 
