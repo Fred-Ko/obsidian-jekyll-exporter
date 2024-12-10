@@ -24,7 +24,7 @@ const BUTTON_DELETE = "Delete";
 const BUTTON_EXPORT = "Export to Jekyll";
 const ICON_UPLOAD = "upload";
 const DEFAULT_FRONT_MATTER_TEMPLATE =
-	"---\ntitle: {{title}}\ndate: {{date}}\ntags: []\n---\n";
+	"---\ntitle: {{title}}\ndate: {{date}}\ntags: {{tags}}\n---\n";
 
 // CSS Styles to be injected
 const MODAL_CSS = `
@@ -269,6 +269,10 @@ interface JekyllExportSettings {
 	attachmentSearchMode: "vault" | "specified" | "same" | "subfolder";
 	customAttachmentFolder: string;
 	activeTargetFolder: string;
+	openaiApiBaseUrl: string;
+	openaiModel: string;
+	openaiApiKey: string;
+	useAutoTags: boolean;
 }
 
 // ========================= Default Settings =========================
@@ -281,6 +285,10 @@ const DEFAULT_SETTINGS: JekyllExportSettings = {
 	attachmentSearchMode: "vault",
 	customAttachmentFolder: "",
 	activeTargetFolder: "",
+	openaiApiBaseUrl: "https://api.openai.com/v1",
+	openaiModel: "gpt-3.5-turbo",
+	openaiApiKey: "",
+	useAutoTags: false,
 };
 
 // ========================= Helper Functions =========================
@@ -428,7 +436,7 @@ class JekyllExporter {
 			let content = await this.app.vault.read(file);
 
 			// Add/Update Front Matter
-			content = this.processFrontMatter(content, file.path);
+			content = await this.processFrontMatter(content, file.path);
 
 			// Copy attached images
 			await this.copyAttachedImages(file);
@@ -490,16 +498,23 @@ class JekyllExporter {
 	/**
 	 * Adds front matter template if not present.
 	 */
-	private processFrontMatter(content: string, filePath: string): string {
+	private async processFrontMatter(content: string, filePath: string): Promise<string> {
 		const frontMatterRegex = /^---\n([\s\S]*?)\n---/;
 		const hasFrontMatter = frontMatterRegex.test(content);
 
 		if (!hasFrontMatter) {
 			const title = path.basename(filePath, ".md");
 			const date = new Date().toISOString().split("T")[0];
+			
+			// 태그 추출
+			const tags = await this.extractTags(content);
+			const tagsString = tags.length > 0 ? `[${tags.join(", ")}]` : "[]";
+			
 			const template = this.settings.frontMatterTemplate
 				.replace("{{title}}", title)
-				.replace("{{date}}", date);
+				.replace("{{date}}", date)
+				.replace("{{tags}}", tagsString); // 명확한 태그 플레이스홀더 사용
+				
 			return template + content;
 		}
 
@@ -525,13 +540,21 @@ class JekyllExporter {
 	private processImageLinks(content: string): string {
 		return content.replace(/!\[\[([^\]]+)\]\]/g, (match, imageName) => {
 			// 외부 링크인지 확인
-			if (imageName.startsWith("http://") || imageName.startsWith("https://")) {
+			if (
+				imageName.startsWith("http://") ||
+				imageName.startsWith("https://")
+			) {
 				return `![](${imageName})`;
 			}
 
 			// 외부 링크가 아닌 경우에만 이름을 sanitized
-			const sanitizedImageName = imageName.toLowerCase().replace(/\s+/g, '-');
-			const imagePath = path.join(this.settings.imageFolder, sanitizedImageName);
+			const sanitizedImageName = imageName
+				.toLowerCase()
+				.replace(/\s+/g, "-");
+			const imagePath = path.join(
+				this.settings.imageFolder,
+				sanitizedImageName
+			);
 			return `![](${imagePath})`;
 		});
 	}
@@ -663,15 +686,28 @@ class JekyllExporter {
 					if (imageName) {
 						// 보관소의 모든 파일을 순회하여 이미지 파일 찾기
 						const allFiles = this.app.vault.getFiles();
-						const imageFile = allFiles.find(f => f.path.endsWith(imageName));
+						const imageFile = allFiles.find((f) =>
+							f.path.endsWith(imageName)
+						);
 						console.log(imageFile);
 						if (imageFile instanceof TFile) {
-							const imageData = await this.app.vault.readBinary(imageFile);
+							const imageData = await this.app.vault.readBinary(
+								imageFile
+							);
 							const buffer = Buffer.from(imageData);
-							const sanitizedImageName = path.basename(imageName).toLowerCase().replace(/\s+/g, '-');
-							const targetImagePath = path.join(this.settings.activeTargetFolder, this.settings.imageFolder, sanitizedImageName);
+							const sanitizedImageName = path
+								.basename(imageName)
+								.toLowerCase()
+								.replace(/\s+/g, "-");
+							const targetImagePath = path.join(
+								this.settings.activeTargetFolder,
+								this.settings.imageFolder,
+								sanitizedImageName
+							);
 							console.log(targetImagePath);
-							await fs.mkdir(path.dirname(targetImagePath), { recursive: true });
+							await fs.mkdir(path.dirname(targetImagePath), {
+								recursive: true,
+							});
 							await fs.writeFile(targetImagePath, buffer);
 						}
 					}
@@ -686,10 +722,84 @@ class JekyllExporter {
 	// 새로운 헬퍼 함수 수정: HTTP 주소를 마크다운 링크로 변환 (특정 조건 제외)
 	private convertHttpUrlsToLinks(content: string): string {
 		// URL 뒤에 오는 특수문자 제외 (예: 괄호, 마침표)
-		const urlRegex = /(https?:\/\/[^\s\)]+)/g;
+		const urlRegex = /(https?:\/\/[^\s)]+)/g;
 		return content.replace(urlRegex, (url) => {
 			return `[${url}](${url})`;
 		});
+	}
+
+	// Constants 섹션에 추가
+	TAG_EXTRACTION_PROMPT = `
+	Given the following content, extract up to 10 relevant tags that best describe the main topics, technologies, concepts, or themes discussed.
+	Rules:
+	1. Return only the tags as a comma-separated list
+	2. Use lowercase for all tags
+	3. Replace spaces with hyphens in multi-word tags
+	4. Maximum 10 tags
+	5. No special characters except hyphens
+	6. No explanations, just the tags
+
+	Content:
+	`;
+
+	// JekyllExporter 클래스 내에 새로운 메소드 추가
+	private async extractTags(content: string): Promise<string[]> {
+		// useAutoTags가 false면 빈 배열 반환
+		if (!this.settings.useAutoTags) {
+			return [];
+		}
+		
+		if (!this.settings.openaiApiKey) {
+			console.log("OpenAI API key not configured");
+			return [];
+		}
+
+		try {
+			const response = await fetch(
+				`${this.settings.openaiApiBaseUrl}/chat/completions`,
+				{
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${this.settings.openaiApiKey}`,
+					},
+					body: JSON.stringify({
+						model: this.settings.openaiModel,
+						messages: [
+							{
+								role: "system",
+								content: "You are a tag extraction assistant. Extract relevant tags from the given content."
+							},
+							{
+								role: "user",
+								content: this.TAG_EXTRACTION_PROMPT + content
+							}
+						],
+						temperature: 0.3,
+						max_tokens: 100
+					}),
+				}
+			);
+
+			if (!response.ok) {
+				throw new Error(`API request failed: ${response.statusText}`);
+			}
+
+			const data = await response.json();
+			const tagString = data.choices[0].message.content.trim();
+			
+			// 콤마로 구분된 태그를 배열로 변환하고 정리
+			const tags = tagString
+				.split(",")
+				.map((tag: string) => tag.trim().toLowerCase())
+				.filter((tag: string) => tag) // 빈 태그 제거
+				.slice(0, 10); // 최대 10개로 제한
+
+			return tags;
+		} catch (error) {
+			console.error("Error extracting tags:", error);
+			return [];
+		}
 	}
 }
 
@@ -711,32 +821,33 @@ class JekyllExportSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		// 최상위 컨테이너에 플러그인 전용 클래스 추가
-		containerEl.addClass('jekyll-export-plugin');
-		containerEl.addClass('jekyll-settings-container');
+		containerEl.addClass("jekyll-export-plugin");
+		containerEl.addClass("jekyll-settings-container");
 
 		// 타겟 폴더 섹션
-		const targetSection = containerEl.createDiv('jekyll-settings-section');
-		targetSection.createEl('h2', { text: 'Target Folders' });
+		const targetSection = containerEl.createDiv("jekyll-settings-section");
+		targetSection.createEl("h2", { text: "Target Folders" });
 
-		const foldersContainer = targetSection.createDiv('folders-container');
+		const foldersContainer = targetSection.createDiv("folders-container");
 
 		// 기존 폴더 목록 표시
 		this.plugin.settings.targetFolders.forEach((folder, index) => {
-			const folderDiv = foldersContainer.createDiv('folder-item');
+			const folderDiv = foldersContainer.createDiv("folder-item");
 
-			const folderSpan = folderDiv.createSpan({
+			folderDiv.createSpan({
 				text: folder,
-				cls: 'folder-path'
+				cls: "folder-path",
 			});
 
-			const deleteBtn = new ButtonComponent(folderDiv)
+			new ButtonComponent(folderDiv)
 				.setButtonText(BUTTON_DELETE)
-				.setClass('jekyll-button')
-				.setClass('danger')
+				.setClass("jekyll-button")
+				.setClass("danger")
 				.onClick(async () => {
 					this.plugin.settings.targetFolders.splice(index, 1);
 					if (this.plugin.settings.activeTargetFolder === folder) {
-						this.plugin.settings.activeTargetFolder = this.plugin.settings.targetFolders[0] || '';
+						this.plugin.settings.activeTargetFolder =
+							this.plugin.settings.targetFolders[0] || "";
 					}
 					await this.plugin.saveSettings();
 					this.display();
@@ -745,17 +856,17 @@ class JekyllExportSettingTab extends PluginSettingTab {
 
 		// 새 폴더 추가 설정
 		new Setting(targetSection)
-			.setName('Add New Target Folder')
-			.setDesc('Jekyll site root path (e.g., /path/to/jekyll/site)')
-			.addText(text => {
+			.setName("Add New Target Folder")
+			.setDesc("Jekyll site root path (e.g., /path/to/jekyll/site)")
+			.addText((text) => {
 				this.newFolderInput = text;
-				text.inputEl.addClass('folder-input');
-				text.setPlaceholder('/path/to/jekyll/site');
+				text.inputEl.addClass("folder-input");
+				text.setPlaceholder("/path/to/jekyll/site");
 			})
-			.addButton(button => {
+			.addButton((button) => {
 				button
 					.setButtonText(BUTTON_ADD)
-					.setClass('jekyll-button')
+					.setClass("jekyll-button")
 					.onClick(async () => {
 						const value = this.newFolderInput.getValue().trim();
 						if (
@@ -768,9 +879,11 @@ class JekyllExportSettingTab extends PluginSettingTab {
 								this.plugin.settings.targetFolders.push(value);
 								// Activate the first added folder
 								if (
-									this.plugin.settings.targetFolders.length === 1
+									this.plugin.settings.targetFolders
+										.length === 1
 								) {
-									this.plugin.settings.activeTargetFolder = value;
+									this.plugin.settings.activeTargetFolder =
+										value;
 								}
 								await this.plugin.saveSettings();
 								this.newFolderInput.setValue("");
@@ -785,18 +898,20 @@ class JekyllExportSettingTab extends PluginSettingTab {
 			});
 
 		// 활성 폴더 선택 섹션
-		const activeSection = containerEl.createDiv('jekyll-settings-section');
-		activeSection.createEl('h2', { text: 'Active Target Folder' });
+		const activeSection = containerEl.createDiv("jekyll-settings-section");
+		activeSection.createEl("h2", { text: "Active Target Folder" });
 
 		new Setting(activeSection)
-			.setName('Select Active Folder')
-			.setDesc('Choose the active target folder for exports.')
-			.addDropdown(dropdown => {
-				this.plugin.settings.targetFolders.forEach(folder => {
+			.setName("Select Active Folder")
+			.setDesc("Choose the active target folder for exports.")
+			.addDropdown((dropdown) => {
+				this.plugin.settings.targetFolders.forEach((folder) => {
 					dropdown.addOption(folder, folder);
 				});
-				dropdown.setValue(this.plugin.settings.activeTargetFolder || '');
-				dropdown.selectEl.addClass('folder-select');
+				dropdown.setValue(
+					this.plugin.settings.activeTargetFolder || ""
+				);
+				dropdown.selectEl.addClass("folder-select");
 				dropdown.onChange(async (value) => {
 					// Validate selected folder
 					try {
@@ -811,14 +926,16 @@ class JekyllExportSettingTab extends PluginSettingTab {
 			});
 
 		// Front Matter 섹션
-		const frontMatterSection = containerEl.createDiv('jekyll-settings-section');
-		frontMatterSection.createEl('h2', { text: 'Front Matter Settings' });
+		const frontMatterSection = containerEl.createDiv(
+			"jekyll-settings-section"
+		);
+		frontMatterSection.createEl("h2", { text: "Front Matter Settings" });
 
 		new Setting(frontMatterSection)
-			.setName('Front Matter Template')
-			.setDesc('Default Front Matter template for new documents')
-			.addTextArea(text => {
-				text.inputEl.addClass('front-matter-textarea');
+			.setName("Front Matter Template")
+			.setDesc("Default Front Matter template for new documents")
+			.addTextArea((text) => {
+				text.inputEl.addClass("front-matter-textarea");
 				text.setPlaceholder(DEFAULT_FRONT_MATTER_TEMPLATE)
 					.setValue(this.plugin.settings.frontMatterTemplate)
 					.onChange(async (value: string) => {
@@ -828,17 +945,163 @@ class JekyllExportSettingTab extends PluginSettingTab {
 			});
 
 		// 이미지 설정 섹션
-		const imageSection = containerEl.createDiv('jekyll-settings-section');
-		imageSection.createEl('h2', { text: 'Image Settings' });
+		const imageSection = containerEl.createDiv("jekyll-settings-section");
+		imageSection.createEl("h2", { text: "Image Settings" });
 
 		new Setting(imageSection)
-			.setName('Image Folder')
-			.setDesc('Image storage path in Jekyll site')
-			.addText(text => {
-				text.setPlaceholder('assets/img')
+			.setName("Image Folder")
+			.setDesc("Image storage path in Jekyll site")
+			.addText((text) => {
+				text.setPlaceholder("assets/img")
 					.setValue(this.plugin.settings.imageFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.imageFolder = value.trim();
+						await this.plugin.saveSettings();
+					});
+			});
+
+		// OpenAI 설정 섹션
+		const openaiSection = containerEl.createDiv("jekyll-settings-section");
+		openaiSection.createEl("h2", { text: "OpenAI Settings" });
+
+		new Setting(openaiSection)
+			.setName("API Base URL")
+			.setDesc("OpenAI API base URL")
+			.addText((text) => {
+				text.setValue(this.plugin.settings.openaiApiBaseUrl)
+					.setPlaceholder("https://api.openai.com/v1")
+					.onChange(async (value) => {
+						this.plugin.settings.openaiApiBaseUrl = value.trim();
+						await this.plugin.saveSettings();
+					});
+			});
+
+		// OpenAI 모델 상수 추가
+		const OPENAI_MODELS = [
+			"gpt-4",
+			"gpt-4o-mini",
+			"gpt-4-turbo",
+			"gpt-3.5-turbo",
+			"custom",
+		];
+
+		let customModelInput: TextComponent;
+
+		new Setting(openaiSection)
+			.setName("Model")
+			.setDesc("Select OpenAI model or enter custom model name")
+			.addDropdown((dropdown) => {
+				OPENAI_MODELS.forEach((model) => {
+					dropdown.addOption(model, model);
+				});
+				const currentModel = this.plugin.settings.openaiModel;
+				// 현재 설정된 모델이 기본 목록에 없으면 custom 선택
+				const value = OPENAI_MODELS.includes(currentModel)
+					? currentModel
+					: "custom";
+				dropdown.setValue(value);
+				dropdown.onChange(async (value) => {
+					if (value === "custom") {
+						customModelInput.inputEl.style.display = "block";
+					} else {
+						customModelInput.inputEl.style.display = "none";
+						this.plugin.settings.openaiModel = value;
+						await this.plugin.saveSettings();
+					}
+				});
+			})
+			.addText((text) => {
+				customModelInput = text;
+				text.setPlaceholder("Enter custom model name")
+					.setValue(
+						OPENAI_MODELS.includes(this.plugin.settings.openaiModel)
+							? ""
+							: this.plugin.settings.openaiModel
+					)
+					.onChange(async (value) => {
+						if (value) {
+							this.plugin.settings.openaiModel = value.trim();
+							await this.plugin.saveSettings();
+						}
+					});
+				// 초기 상태 설정
+				text.inputEl.style.display = OPENAI_MODELS.includes(
+					this.plugin.settings.openaiModel
+				)
+					? "none"
+					: "block";
+			});
+
+		new Setting(openaiSection)
+			.setName("API Key")
+			.setDesc("Your OpenAI API key")
+			.addText((text) => {
+				text
+					.setValue(this.plugin.settings.openaiApiKey)
+					.setPlaceholder("sk-...").inputEl.type = "password";
+				text.onChange(async (value) => {
+					this.plugin.settings.openaiApiKey = value.trim();
+					await this.plugin.saveSettings();
+				});
+			});
+
+		// 테스트 버튼 추가
+		new Setting(openaiSection)
+			.setName("Test API Connection")
+			.setDesc("Test your OpenAI API connection")
+			.addButton((button) => {
+				button
+					.setButtonText("Test Connection")
+					.setClass("jekyll-button")
+					.onClick(async () => {
+						try {
+							const response = await fetch(
+								`${this.plugin.settings.openaiApiBaseUrl}/chat/completions`,
+								{
+									method: "POST",
+									headers: {
+										"Content-Type": "application/json",
+										Authorization: `Bearer ${this.plugin.settings.openaiApiKey}`,
+									},
+									body: JSON.stringify({
+										model: this.plugin.settings.openaiModel,
+										messages: [
+											{
+												role: "user",
+												content:
+													"Hello! This is a test message.",
+											},
+										],
+									}),
+								}
+							);
+
+							if (response.ok) {
+								new Notice("API connection successful!");
+							} else {
+								const error = await response.json();
+								new Notice(
+									`API connection failed: ${
+										error.error?.message || "Unknown error"
+									}`
+								);
+							}
+						} catch (error) {
+							new Notice(
+								`API connection failed: ${error.message}`
+							);
+						}
+					});
+			});
+
+		new Setting(openaiSection)
+			.setName("Auto Tag Generation")
+			.setDesc("Automatically generate tags using OpenAI when no tags are present")
+			.addToggle(toggle => {
+				toggle
+					.setValue(this.plugin.settings.useAutoTags)
+					.onChange(async (value) => {
+						this.plugin.settings.useAutoTags = value;
 						await this.plugin.saveSettings();
 					});
 			});
@@ -855,7 +1118,7 @@ export default class JekyllExportPlugin extends Plugin {
 	async onload() {
 		// CSS 스타일 주입
 		injectStyles(MODAL_CSS);
-		injectStyles(SETTINGS_CSS);  // 새로운 CSS 추가
+		injectStyles(SETTINGS_CSS); // 새로운 CSS 추가
 
 		// Load settings
 		await this.loadSettings();
