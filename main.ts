@@ -99,7 +99,7 @@ interface JekyllExportSettings {
 	excludePatterns: string[];
 	frontMatterTemplate: string;
 	imageFolder: string;
-	attachmentSearchMode: "obsidian" | "current" | "subfolder" | "custom";
+	attachmentSearchMode: "vault" | "specified" | "same" | "subfolder";
 	customAttachmentFolder: string;
 	activeTargetFolder: string;
 }
@@ -111,7 +111,7 @@ const DEFAULT_SETTINGS: JekyllExportSettings = {
 	excludePatterns: [],
 	frontMatterTemplate: DEFAULT_FRONT_MATTER_TEMPLATE,
 	imageFolder: "assets/images",
-	attachmentSearchMode: "obsidian",
+	attachmentSearchMode: "vault",
 	customAttachmentFolder: "",
 	activeTargetFolder: "",
 };
@@ -263,11 +263,14 @@ class JekyllExporter {
 			// Add/Update Front Matter
 			content = this.processFrontMatter(content, file.path);
 
-			// Convert wiki links to markdown links
-			content = this.convertWikiLinks(content);
+			// Copy attached images
+			await this.copyAttachedImages(file);
 
 			// Convert image links
 			content = this.processImageLinks(content);
+
+			// Convert wiki links to markdown links
+			content = this.convertWikiLinks(content);
 
 			// Create Jekyll file name
 			const fileName = this.createJekyllFileName(file);
@@ -347,11 +350,19 @@ class JekyllExporter {
 
 	/**
 	 * Converts ![[Image]] to standard Markdown image links.
+	 * ex) ![[Pasted image 20241210170154.png]] -> ![](/assets/images/Pasted image 20241210170154.png)
 	 */
 	private processImageLinks(content: string): string {
-		return content.replace(/!\[\[(.*?)\]\]/g, (match, image) => {
-			const imagePath = `/${this.settings.imageFolder}/${image}`;
-			return `![${image}](${imagePath})`;
+		return content.replace(/!\[\[([^\]]+)\]\]/g, (match, imageName) => {
+			// 외부 링크인지 확인
+			if (imageName.startsWith("http://") || imageName.startsWith("https://")) {
+				return `![](${imageName})`;
+			}
+
+			// 외부 링크가 아닌 경우에만 이름을 sanitized
+			const sanitizedImageName = imageName.toLowerCase().replace(/\s+/g, '-');
+			const imagePath = path.join(this.settings.imageFolder, sanitizedImageName);
+			return `![](${imagePath})`;
 		});
 	}
 
@@ -466,6 +477,41 @@ class JekyllExporter {
 			return existingFilePath;
 		}
 	}
+
+	/**
+	 * 첨부된 이미지들을 Jekyll 이미지 폴더로 복사함.
+	 * @param file 이미지가 포함된 TFile
+	 */
+	private async copyAttachedImages(file: TFile) {
+		try {
+			const content = await this.app.vault.read(file);
+			const imageMatches = content.match(/!\[\[([^\]]+)\]\]/g);
+			if (imageMatches) {
+				for (const match of imageMatches) {
+					const imageName = match.match(/!\[\[(.+?)\]\]/)?.[1];
+					console.log(imageName);
+					if (imageName) {
+						// 보관소의 모든 파일을 순회하여 이미지 파일 찾기
+						const allFiles = this.app.vault.getFiles();
+						const imageFile = allFiles.find(f => f.path.endsWith(imageName));
+						console.log(imageFile);
+						if (imageFile instanceof TFile) {
+							const imageData = await this.app.vault.readBinary(imageFile);
+							const buffer = Buffer.from(imageData);
+							const sanitizedImageName = path.basename(imageName).toLowerCase().replace(/\s+/g, '-');
+							const targetImagePath = path.join(this.settings.activeTargetFolder, this.settings.imageFolder, sanitizedImageName);
+							console.log(targetImagePath);
+							await fs.mkdir(path.dirname(targetImagePath), { recursive: true });
+							await fs.writeFile(targetImagePath, buffer);
+						}
+					}
+				}
+			}
+		} catch (error) {
+			console.error("이미지 복사 중 에러 발생:", error);
+			new Notice("이미지 복사 중 오류가 발생했습니다.");
+		}
+	}
 }
 
 // ========================= Settings Tab =========================
@@ -483,6 +529,10 @@ class JekyllExportSettingTab extends PluginSettingTab {
 	// Display the settings UI
 	display(): void {
 		const { containerEl } = this;
+		if (!containerEl) {
+			console.error("containerEl이 초기화되지 않았습니다.");
+			return;
+		}
 		containerEl.empty();
 
 		containerEl.createEl("h2", { text: "Basic Settings" });
@@ -588,20 +638,20 @@ class JekyllExportSettingTab extends PluginSettingTab {
 					})
 			);
 
-		// // Image folder settings
-		// containerEl.createEl("h2", { text: "Image Settings" });
-		// new Setting(containerEl)
-		// 	.setName("Image Folder")
-		// 	.setDesc("Image storage path in Jekyll site")
-		// 	.addText((text) =>
-		// 		text
-		// 			.setPlaceholder("assets/images")
-		// 			.setValue(this.plugin.settings.imageFolder)
-		// 			.onChange(async (value) => {
-		// 				this.plugin.settings.imageFolder = value.trim();
-		// 				await this.plugin.saveSettings();
-		// 			})
-		// 	);
+		// Image folder settings
+		containerEl.createEl("h2", { text: "Image Settings" });
+		new Setting(containerEl)
+			.setName("Image Folder")
+			.setDesc("Image storage path in Jekyll site")
+			.addText((text) =>
+				text
+					.setPlaceholder("assets/img")
+					.setValue(this.plugin.settings.imageFolder)
+					.onChange(async (value) => {
+						this.plugin.settings.imageFolder = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
 	}
 }
 
