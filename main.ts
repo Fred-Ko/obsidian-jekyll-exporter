@@ -85,165 +85,167 @@ const MODAL_CSS = `
 
 // Constants 섹션에 새로운 CSS 추가
 const SETTINGS_CSS = `
-.jekyll-settings-container {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 24px;
-}
-
-.jekyll-settings-section {
-    background: var(--background-secondary);
-    border-radius: 12px;
-    padding: 24px 32px;
-    margin-bottom: 32px;
-}
-
-.jekyll-settings-section h2 {
-    margin: 0 0 24px 0;
-    padding-bottom: 12px;
-    border-bottom: 2px solid var(--background-modifier-border);
-    color: var(--text-normal);
-    font-size: 1.8em;
-    font-weight: 600;
-}
-
-.folders-container {
-    background: var(--background-primary);
-    border-radius: 8px;
-    padding: 16px;
-    margin: 16px 0 24px 0;
-}
-
-.folder-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 12px !important;
-    margin-bottom: 8px !important;
-    background: var(--background-secondary);
-    border-radius: 4px !important;
-    transition: all 0.2s ease;
-}
-
-.folder-item:hover {
-    background: var(--background-modifier-hover);
-}
-
-.folder-path {
-    font-family: var(--font-monospace);
-    font-size: 0.9em !important;
-    color: var(--text-normal);
-    flex: 1;
-    margin-right: 16px;
-    word-break: break-all;
-}
-
-/* 새 폴더 추가 입력 필드 */
-.folder-input {
-    font-size: 14px !important;
-    padding: 8px 12px !important;
-    width: 100% !important;
-    background: var(--background-primary) !important;
-    box-sizing: border-box !important;
-}
-
-/* 드롭다운 스타일 */
-.folder-select {
-    width: 100% !important;
-    max-width: none !important;
-    padding: 8px 12px !important;
-    background: var(--background-primary) !important;
-    border-radius: 4px !important;
-    margin-top: 8px !important;
-    box-sizing: border-box !important;
-}
-
-/* Front Matter 텍스트 영역 */
-.front-matter-textarea {
-    width: 100% !important;
-    min-height: 200px !important;
-    font-family: var(--font-monospace) !important;
-    font-size: 14px !important;
-    line-height: 1.5 !important;
-    padding: 16px !important;
-    background: var(--background-primary) !important;
-    border: 1px solid var(--background-modifier-border) !important;
-    border-radius: 8px !important;
-    resize: vertical !important;
-    box-sizing: border-box !important;
-}
-
-/* 설정 아이템 간격 조정 */
-.setting-item {
-    border: none;
-    padding: 16px 0;
-    width: 100% !important;
-    display: flex !important;
-    justify-content: space-between !important;
-}
-
-.setting-item-info {
-    margin-bottom: 0 !important;
-    flex: 0 1 300px !important;
-}
-
-.setting-item-name {
-    font-size: 1.1em;
-    font-weight: 600;
-    margin-bottom: 4px;
-}
-
-.setting-item-description {
-    font-size: 0.9em;
-    color: var(--text-muted);
-}
-
-/* 드롭다운과 입력 필드 컨테이너 */
-.setting-item-control {
-    width: 400px !important;
-    padding-right: 0 !important;
-    flex: 0 0 auto !important;
-}
-
-/* 모든 입력 필드에 대한 공통 스타일 */
-.setting-item input[type="text"] {
-    width: 100% !important;
-    font-size: 14px !important;
-    padding: 8px 12px !important;
-    background: var(--background-primary) !important;
-    border-radius: 4px !important;
-    box-sizing: border-box !important;
-}
-
-/* 버튼 스타일 */
-.jekyll-button {
-    padding: 4px 12px !important;
-    border-radius: 4px !important;
-    font-size: 12px !important;
-    font-weight: 500 !important;
-    transition: all 0.2s ease !important;
-    background-color: var(--interactive-accent) !important;
-    color: var(--text-on-accent) !important;
-    min-height: 24px !important;
-    line-height: 1 !important;
-}
-
-.jekyll-button:hover {
-    opacity: 0.9;
-}
-
-.jekyll-button.danger {
-    background-color: var(--text-error) !important;
-}
-
-/* 반응형 조정 */
-@media screen and (max-width: 768px) {
+.jekyll-export-plugin {
     .jekyll-settings-container {
+        max-width: 800px;
+        margin: 0 auto;
         padding: 16px;
     }
 
     .jekyll-settings-section {
-        padding: 20px;
+        background: var(--background-secondary);
+        border-radius: 8px;
+        padding: 12px 24px;
+        margin-bottom: 16px;
+    }
+
+    .jekyll-settings-section h2 {
+        margin: 0 0 12px 0;
+        padding-bottom: 6px;
+        border-bottom: 2px solid var(--background-modifier-border);
+        color: var(--text-normal);
+        font-size: 1.4em;
+        font-weight: 600;
+    }
+
+    .folders-container {
+        background: var(--background-primary);
+        border-radius: 6px;
+        padding: 8px;
+        margin: 8px 0 12px 0;
+    }
+
+    .folder-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px !important;
+        margin-bottom: 8px !important;
+        background: var(--background-secondary);
+        border-radius: 4px !important;
+        transition: all 0.2s ease;
+    }
+
+    .folder-item:hover {
+        background: var(--background-modifier-hover);
+    }
+
+    .folder-path {
+        font-family: var(--font-monospace);
+        font-size: 0.9em !important;
+        color: var(--text-normal);
+        flex: 1;
+        margin-right: 16px;
+        word-break: break-all;
+    }
+
+    /* 새 폴더 추가 입력 필드 */
+    .folder-input {
+        font-size: 14px !important;
+        padding: 8px 12px !important;
+        width: 100% !important;
+        background: var(--background-primary) !important;
+        box-sizing: border-box !important;
+    }
+
+    /* 드롭다운 스타일 */
+    .folder-select {
+        width: 100% !important;
+        max-width: none !important;
+        padding: 8px 12px !important;
+        background: var(--background-primary) !important;
+        border-radius: 4px !important;
+        margin-top: 8px !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Front Matter 텍스트 영역 */
+    .front-matter-textarea {
+        width: 100% !important;
+        min-height: 150px !important;
+        font-family: var(--font-monospace) !important;
+        font-size: 14px !important;
+        line-height: 1.4 !important;
+        padding: 12px !important;
+        background: var(--background-primary) !important;
+        border: 1px solid var(--background-modifier-border) !important;
+        border-radius: 6px !important;
+        resize: vertical !important;
+        box-sizing: border-box !important;
+    }
+
+    /* 설정 아이템 간격 조정 */
+    .setting-item {
+        border: none;
+        padding: 12px 0;
+        width: 100% !important;
+        display: flex !important;
+        justify-content: space-between !important;
+    }
+
+    .setting-item-info {
+        margin-bottom: 0 !important;
+        flex: 0 1 250px !important;
+    }
+
+    .setting-item-name {
+        font-size: 1em;
+        font-weight: 600;
+        margin-bottom: 2px;
+    }
+
+    .setting-item-description {
+        font-size: 0.85em;
+        color: var(--text-muted);
+    }
+
+    /* 드롭다운과 입력 필드 컨테이너 */
+    .setting-item-control {
+        width: 350px !important;
+        padding-right: 0 !important;
+        flex: 0 0 auto !important;
+    }
+
+    /* 모든 입력 필드에 대한 공통 스타일 */
+    .setting-item input[type="text"] {
+        width: 100% !important;
+        font-size: 14px !important;
+        padding: 8px 12px !important;
+        background: var(--background-primary) !important;
+        border-radius: 4px !important;
+        box-sizing: border-box !important;
+    }
+
+    /* 버튼 스타일 */
+    .jekyll-button {
+        padding: 4px 12px !important;
+        border-radius: 4px !important;
+        font-size: 12px !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+        background-color: var(--interactive-accent) !important;
+        color: var(--text-on-accent) !important;
+        min-height: 24px !important;
+        line-height: 1 !important;
+    }
+
+    .jekyll-button:hover {
+        opacity: 0.9;
+    }
+
+    .jekyll-button.danger {
+        background-color: var(--text-error) !important;
+    }
+
+    /* 반응형 조정 */
+    @media screen and (max-width: 768px) {
+        .jekyll-settings-container {
+            padding: 16px;
+        }
+
+        .jekyll-settings-section {
+            padding: 20px;
+        }
     }
 }
 `;
@@ -708,7 +710,8 @@ class JekyllExportSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		// 메인 컨테이너에 클래스 추가
+		// 최상위 컨테이너에 플러그인 전용 클래스 추가
+		containerEl.addClass('jekyll-export-plugin');
 		containerEl.addClass('jekyll-settings-container');
 
 		// 타겟 폴더 섹션
