@@ -1,20 +1,10 @@
 import * as fs from "fs/promises";
-import {
-	App,
-	ButtonComponent,
-	Modal,
-	Notice,
-	Plugin,
-	PluginSettingTab,
-	Setting,
-	TextComponent,
-	TFile,
-} from "obsidian";
+import { customAlphabet } from "nanoid";
+import { App, ButtonComponent, Modal, Notice, Plugin, PluginSettingTab, Setting, TextComponent, TFile } from "obsidian";
 import * as path from "path";
-
 // ========================= Constants =========================
 
-const BUTTON_TEXT_OVERWRITE_DATE_AND_CONTENT = "Overwrite Date and Content";
+const BUTTON_TEXT_OVERWRITE_FRONTMATTER_AND_CONTENT = "Overwrite Date and Content";
 const BUTTON_TEXT_OVERWRITE_CONTENT_ONLY = "Overwrite Content Only";
 const BUTTON_TEXT_CANCEL = "Cancel";
 const MODAL_TITLE = "File Already Exists";
@@ -23,10 +13,9 @@ const BUTTON_ADD = "Add";
 const BUTTON_DELETE = "Delete";
 const BUTTON_EXPORT = "Export to Jekyll";
 const ICON_UPLOAD = "upload";
-const DEFAULT_FRONT_MATTER_TEMPLATE =
-	"---\ntitle: {{title}}\ndate: {{date}}\ntags: {{tags}}\n---\n";
 
-// CSS Styles to be injected
+const DEFAULT_FRONT_MATTER_TEMPLATE = "---\ntitle: {{title}}\ndate: {{date}}\ntags: {{tags}}\n---\n";
+
 const MODAL_CSS = `
 .overwrite-modal-content {
 	padding: 20px;
@@ -83,7 +72,6 @@ const MODAL_CSS = `
 }
 `;
 
-// Constants 섹션에 새로운 CSS 추가
 const SETTINGS_CSS = `
 .jekyll-export-plugin {
     .jekyll-settings-container {
@@ -139,7 +127,6 @@ const SETTINGS_CSS = `
         word-break: break-all;
     }
 
-    /* 새 폴더 추가 입력 필드 */
     .folder-input {
         font-size: 14px !important;
         padding: 8px 12px !important;
@@ -148,7 +135,6 @@ const SETTINGS_CSS = `
         box-sizing: border-box !important;
     }
 
-    /* 드롭다운 스타일 */
     .folder-select {
         width: 100% !important;
         max-width: none !important;
@@ -159,7 +145,6 @@ const SETTINGS_CSS = `
         box-sizing: border-box !important;
     }
 
-    /* Front Matter 텍스트 영역 */
     .front-matter-textarea {
         width: 100% !important;
         min-height: 150px !important;
@@ -174,7 +159,6 @@ const SETTINGS_CSS = `
         box-sizing: border-box !important;
     }
 
-    /* 설정 아이템 간격 조정 */
     .setting-item {
         border: none;
         padding: 12px 0;
@@ -199,14 +183,12 @@ const SETTINGS_CSS = `
         color: var(--text-muted);
     }
 
-    /* 드롭다운과 입력 필드 컨테이너 */
     .setting-item-control {
         width: 350px !important;
         padding-right: 0 !important;
         flex: 0 0 auto !important;
     }
 
-    /* 모든 입력 필드에 대한 공통 스타일 */
     .setting-item input[type="text"] {
         width: 100% !important;
         font-size: 14px !important;
@@ -216,7 +198,6 @@ const SETTINGS_CSS = `
         box-sizing: border-box !important;
     }
 
-    /* 버튼 스타일 */
     .jekyll-button {
         padding: 4px 12px !important;
         border-radius: 4px !important;
@@ -237,7 +218,6 @@ const SETTINGS_CSS = `
         background-color: var(--text-error) !important;
     }
 
-    /* 반응형 조정 */
     @media screen and (max-width: 768px) {
         .jekyll-settings-container {
             padding: 16px;
@@ -250,8 +230,6 @@ const SETTINGS_CSS = `
 }
 `;
 
-// ========================= Enums =========================
-
 enum OverwriteChoice {
 	OverwriteDateAndContent = 1,
 	OverwriteContentOnly,
@@ -260,7 +238,6 @@ enum OverwriteChoice {
 
 // ========================= Interfaces =========================
 
-// Plugin settings interface
 interface JekyllExportSettings {
 	targetFolders: string[];
 	excludePatterns: string[];
@@ -274,8 +251,6 @@ interface JekyllExportSettings {
 	openaiApiKey: string;
 	useAutoTags: boolean;
 }
-
-// ========================= Default Settings =========================
 
 const DEFAULT_SETTINGS: JekyllExportSettings = {
 	targetFolders: [],
@@ -291,34 +266,27 @@ const DEFAULT_SETTINGS: JekyllExportSettings = {
 	useAutoTags: false,
 };
 
-// ========================= Helper Functions =========================
+// ========================= Utility Functions =========================
 
-// Create a styled button
-function createStyledButton(
-	container: HTMLElement,
-	text: string,
-	isPrimary: boolean,
-	callback: () => void
-): ButtonComponent {
-	const btn = new ButtonComponent(container)
-		.setButtonText(text)
-		.onClick(callback);
-	btn.buttonEl.classList.add(
-		isPrimary ? "button-primary" : "button-secondary"
-	);
-	return btn;
+function alphaNumNanoId(): string {
+	const alphaNum = "123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	return customAlphabet(alphaNum, 25)();
 }
 
-// Inject CSS styles into the document
 function injectStyles(css: string) {
 	const style = document.createElement("style");
 	style.innerHTML = css;
 	document.head.appendChild(style);
 }
 
-// ========================= Modal Classes =========================
+function createStyledButton(container: HTMLElement, text: string, isPrimary: boolean, callback: () => void): ButtonComponent {
+	const btn = new ButtonComponent(container).setButtonText(text).onClick(callback);
+	btn.buttonEl.classList.add(isPrimary ? "button-primary" : "button-secondary");
+	return btn;
+}
 
-// File overwrite selection modal
+// ========================= Modal Class =========================
+
 class OverwriteModal extends Modal {
 	private result: Promise<OverwriteChoice>;
 	private resolvePromise!: (value: OverwriteChoice) => void;
@@ -330,47 +298,30 @@ class OverwriteModal extends Modal {
 		});
 	}
 
-	// Configure UI when modal opens
 	onOpen() {
 		const { contentEl } = this;
-
-		// Add CSS class for styling
 		contentEl.addClass("overwrite-modal-content");
 
-		// Title
 		const title = contentEl.createEl("h2", { text: MODAL_TITLE });
 		title.addClass("overwrite-modal-title");
 
-		// Description
 		const description = contentEl.createEl("p", {
 			text: MODAL_DESCRIPTION,
 		});
 		description.addClass("overwrite-modal-description");
 
-		// Button container
 		const buttonContainer = contentEl.createDiv();
 		buttonContainer.addClass("overwrite-modal-button-container");
 
-		// Create buttons
-		createStyledButton(
-			buttonContainer,
-			BUTTON_TEXT_OVERWRITE_DATE_AND_CONTENT,
-			true,
-			() => {
-				this.resolvePromise(OverwriteChoice.OverwriteDateAndContent);
-				this.close();
-			}
-		);
+		createStyledButton(buttonContainer, BUTTON_TEXT_OVERWRITE_FRONTMATTER_AND_CONTENT, true, () => {
+			this.resolvePromise(OverwriteChoice.OverwriteDateAndContent);
+			this.close();
+		});
 
-		createStyledButton(
-			buttonContainer,
-			BUTTON_TEXT_OVERWRITE_CONTENT_ONLY,
-			false,
-			() => {
-				this.resolvePromise(OverwriteChoice.OverwriteContentOnly);
-				this.close();
-			}
-		);
+		createStyledButton(buttonContainer, BUTTON_TEXT_OVERWRITE_CONTENT_ONLY, false, () => {
+			this.resolvePromise(OverwriteChoice.OverwriteContentOnly);
+			this.close();
+		});
 
 		createStyledButton(buttonContainer, BUTTON_TEXT_CANCEL, false, () => {
 			this.resolvePromise(OverwriteChoice.Cancel);
@@ -379,407 +330,281 @@ class OverwriteModal extends Modal {
 	}
 
 	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
+		this.contentEl.empty();
 	}
 
-	// Returns the user's choice
 	async getResult(): Promise<OverwriteChoice> {
 		return this.result;
 	}
 }
 
-// ========================= Exporter Class =========================
+// ========================= SRP Classes =========================
 
-// Class responsible for file processing and conversion
-class JekyllExporter {
-	private app: App;
-	private settings: JekyllExportSettings;
+class FrontMatterProcessor {
+	private readonly frontMatterRegex = /^---\r?\n[\s\S]*?\r?\n---/;
+	private readonly frontMatterProcessors = {
+		"{{title}}": (title: string) => title,
+		"{{date}}": () => new Date().toISOString().split("T")[0],
+		"{{datetime}}": () => new Date().toISOString(),
+		"{{nanoId}}": () => alphaNumNanoId(),
+	};
 
-	constructor(app: App, settings: JekyllExportSettings) {
-		this.app = app;
-		this.settings = settings;
-	}
+	constructor(private app: App, private settings: JekyllExportSettings, private openAITagExtractor: OpenAITagExtractor) {}
 
-	/**
-	 * Converts a given file to Jekyll format and exports it to the target folder.
-	 * @param file The TFile to convert
-	 */
-	public async exportFile(file: TFile): Promise<string | null> {
-		const targetDir = this.settings.activeTargetFolder;
-		if (!targetDir) {
-			new Notice("No active target folder set.");
-			return null;
-		}
+	public async addTemplateFrontMatter(file: TFile): Promise<string> {
+		const content = await this.app.vault.read(file);
+		const tags = await this.openAITagExtractor.extractTags(content);
 
-		try {
-			// Verify target directory exists
-			await fs.access(targetDir);
-		} catch {
-			new Notice("Active target folder does not exist.");
-			return null;
-		}
-
-		// Process the file
-		return await this.processFile(file, targetDir);
-	}
-
-	/**
-	 * Processes the file and returns the path to the exported file.
-	 * If a file with the same name exists, handles according to user's choice.
-	 */
-	private async processFile(
-		file: TFile,
-		targetDir: string
-	): Promise<string | null> {
-		try {
-			let content = await this.app.vault.read(file);
-
-			// Add/Update Front Matter
-			content = await this.processFrontMatter(content, file.path);
-
-			// 링크 처리 통합
-			content = await this.processLinks(content);
-
-			// Create Jekyll file name
-			const fileName = this.createJekyllFileName(file);
-			const relativeDir = path.dirname(file.path);
-
-			// Specify _posts directory
-			const targetPath = path.join(
-				targetDir,
-				relativeDir,
-				"_posts",
-				fileName
-			);
-			const targetPostsDir = path.dirname(targetPath);
-
-			// Create directories
-			await fs.mkdir(targetPostsDir, { recursive: true });
-
-			// Check if file exists
-			const existingFilePath = await this.findExistingFile(
-				targetPostsDir,
-				file
-			);
-			if (existingFilePath) {
-				// Handle existing file with modal
-				const modal = new OverwriteModal(this.app);
-				modal.open();
-				const choice = await modal.getResult();
-
-				return await this.handleExistingFile(
-					choice,
-					existingFilePath,
-					targetPath,
-					content
-				);
-			} else {
-				// Save new file
-				await fs.writeFile(targetPath, content, "utf8");
-				return targetPath;
-			}
-		} catch (error) {
-			console.error("Error processing file:", error);
-			new Notice("An error occurred while processing the file.");
-			return null;
-		}
-	}
-
-	private async processLinks(content: string): Promise<string> {
-		try {
-			const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".webp"];
-			const lines = content.split("\n");
-			let processedContent = "";
-	
-			// 판단 함수
-			const determineLineType = (line: string): string => {
-				if (/\[[^\]]*\]\([^)]*\)/.test(line)) {
-					return "mdLink";
-				} else if (/^\[\[.*?\]\]$/.test(line) && !line.includes("http")) {
-					return "obsidianLink";
-				} else if (/^!\[\[.*?\]\]$/.test(line)) {
-					return "obsidianImage";
-				}
-				return "other";
-			};
-	
-			for (const line of lines) {
-				const lineType = determineLineType(line);
-
-				switch (lineType) {
-					case "mdLink":
-						// 이미 MD 문법에 맞는 링크는 그대로 추가
-						processedContent += `${line}\n`;
-						break;
-	
-					case "obsidianLink":
-						// 옵시디안 형식의 텍스트 링크를 MD 형식으로 변환
-						// Example: [[Page Name|Custom Title]] -> [Custom Title](page-name)
-						processedContent += line.replace(/\[\[(.*?)\]\]/g, (match, link) => {
-							const parts = link.split("|");
-							const title = parts[1] || parts[0];
-							const url = parts[0].toLowerCase().replace(/ /g, "-");
-	
-							// HTTP로 시작하거나 빈 URL은 그대로 둔다
-							if (url.startsWith("http") || !url) {
-								return match;
-							}
-	
-							return `[${title}](${url})`;
-						}) + "\n";
-						break;
-	
-					case "obsidianImage":
-						// 옵시디안 형식의 이미지 링크를 Jekyll 마크다운 엔진 형식으로 변환
-						// Example: ![[image.png|100]] -> ![](image.png){:width="100px"}
-						const match = line.match(/!\[\[([^\]|]+)(?:\|(\d+))?\]\]/);
-						if (match) {
-							const [, imageName, width] = match;
-							if (imageName.startsWith("http")) {
-								processedContent += width
-									? `![](${imageName}){:width="${width}px"}\n`
-									: `![](${imageName})\n`;
-							} else if (imageExtensions.some(ext => imageName.toLowerCase().endsWith(ext))) {
-								const allFiles = this.app.vault.getFiles();
-								const imageFile = allFiles.find(f => f.path.endsWith(imageName));
-	
-								if (imageFile) {
-									try {
-										const imageData = await this.app.vault.readBinary(imageFile);
-										const sanitizedImageName = path.basename(imageName).toLowerCase().replace(/\s+/g, "-");
-										const targetImagePath = path.join(
-											this.settings.activeTargetFolder,
-											this.settings.imageFolder,
-											sanitizedImageName
-										);
-	
-										await fs.mkdir(path.dirname(targetImagePath), { recursive: true });
-										await fs.writeFile(targetImagePath, Buffer.from(imageData));
-	
-										const newImagePath = path.join(this.settings.imageFolder, sanitizedImageName);
-										processedContent += width
-											? `![](${newImagePath}){:width="${width}px"}\n`
-											: `![](${newImagePath})\n`;
-									} catch (error) {
-										console.error(`이미지 처리 중 에러 발생: ${error}`);
-										new Notice(`이미지 처리 중 에러가 발생했습니다: ${imageName}`);
-									}
-								}
-							}
-						}
-						break;
-	
-					default:
-						// 다른 내용은 그대로 추가
-						processedContent += `${line}\n`;
-						break;
-				}
-			}
-	
-			return processedContent.trim();
-		} catch (error) {
-			console.error("링크 처리 중 에러 발생:", error);
-			return content; // 오류 발생 시 원본 콘텐츠 반환
-		}
-	}
-	
-	
-
-	/**
-	 * Adds front matter template if not present.
-	 */
-	private async processFrontMatter(
-		content: string,
-		filePath: string
-	): Promise<string> {
-		const frontMatterRegex = /^---\n([\s\S]*?)\n---/;
-		const hasFrontMatter = frontMatterRegex.test(content);
+		const filePath = file.path;
+		const title = path.basename(filePath, ".md");
+		const hasFrontMatter = this.hasFrontMatter(content);
 
 		if (!hasFrontMatter) {
-			const title = path.basename(filePath, ".md");
-			const date = new Date().toISOString().split("T")[0];
+			let newFrontMatter = this.settings.frontMatterTemplate;
+			Object.entries(this.frontMatterProcessors).forEach(([key, processor]) => {
+				switch (key) {
+					case "{{title}}":
+						newFrontMatter = newFrontMatter.replace(key, this.frontMatterProcessors[key](title));
+						break;
+					case "{{date}}":
+						newFrontMatter = newFrontMatter.replace(key, this.frontMatterProcessors[key]());
+						break;
+					case "{{datetime}}":
+						newFrontMatter = newFrontMatter.replace(key, this.frontMatterProcessors[key]());
+						break;
+					case "{{nanoId}}":
+						newFrontMatter = newFrontMatter.replace(key, this.frontMatterProcessors[key]());
+						break;
+				}
+			});
 
-			// 태그 추출
-			const tags = await this.extractTags(content);
-			const tagsString = tags.length > 0 ? `[${tags.join(", ")}]` : "[]";
+			newFrontMatter = this.setFrontMatterAttribute(newFrontMatter, "tags", tags.join(", "));
 
-			const template = this.settings.frontMatterTemplate
-				.replace("{{title}}", title)
-				.replace("{{date}}", date)
-				.replace("{{tags}}", tagsString); // 명확한 태그 플레이스홀더 사용
-
-			return template + content;
+			return newFrontMatter + content;
 		}
 
 		return content;
 	}
 
-	/**
-	 * Creates a Jekyll-formatted file name: YYYY-MM-DD-title.md
-	 */
-	private createJekyllFileName(file: TFile): string {
-		const date = new Date().toISOString().split("T")[0];
-		const title = file.basename.replace(/\s+/g, "-");
-		return `${date}-${title}.md`;
-	}
+	public removeEmptyLinesFromFrontMatter(content: string): string {
+		const match = content.match(this.frontMatterRegex);
+		if (!match) {
+			// 프론트매터가 없으면 원본 콘텐츠 반환
+			return content;
+		}
 
-	/**
-	 * Checks if a file with the same name already exists.
-	 */
-	private async findExistingFile(
-		targetPostsDir: string,
-		file: TFile
-	): Promise<string | null> {
-		try {
-			const files = await fs.readdir(targetPostsDir);
-			const currentTitle = file.basename.replace(/\s+/g, "-");
-			const existingFile = files.find((f) => {
-				const match = f.match(/^\d{4}-\d{2}-\d{2}-(.*)\.md$/);
-				return match && match[1] === currentTitle;
-			});
-			if (existingFile) {
-				return path.join(targetPostsDir, existingFile);
+		const frontMatter = match[0];
+		const lines = frontMatter.split(/\r?\n/);
+		// 프론트매터의 시작과 끝을 제외한 중간 부분에서 빈 줄 제거
+		const cleanedLines = lines.filter((line, index) => {
+			// 첫 번째와 마지막 줄(`---`)은 유지
+			if (index === 0 || index === lines.length - 1) {
+				return true;
 			}
-			return null;
-		} catch (error) {
-			console.error("Error searching for existing file:", error);
-			return null;
-		}
+			// 중간의 빈 줄은 제거
+			return line.trim() !== "";
+		});
+
+		const cleanedFrontMatter = cleanedLines.join("\n");
+		// 원본 콘텐츠에서 기존 프론트매터를 제거하고, 정리된 프론트매터로 대체
+		const updatedContent = content.replace(this.frontMatterRegex, cleanedFrontMatter);
+
+		return updatedContent;
 	}
 
-	/**
-	 * Handles existing file based on user's choice.
-	 */
-	private async handleExistingFile(
-		choice: OverwriteChoice,
-		existingFilePath: string,
-		targetPath: string,
-		newContent: string
-	): Promise<string | null> {
-		switch (choice) {
-			case OverwriteChoice.OverwriteDateAndContent:
-				try {
-					await fs.writeFile(targetPath, newContent, "utf8");
-					if (existingFilePath !== targetPath) {
-						await this.safeUnlink(existingFilePath);
-					}
-					return targetPath;
-				} catch (error) {
-					console.error("Error overwriting file:", error);
-					new Notice("An error occurred while overwriting the file.");
-					return null;
-				}
-
-			case OverwriteChoice.OverwriteContentOnly:
-				return await this.overwriteContentOnly(
-					existingFilePath,
-					newContent
-				);
-
-			case OverwriteChoice.Cancel:
-			default:
-				return null;
-		}
+	public hasFrontMatter(content: string): boolean {
+		return this.frontMatterRegex.test(content);
 	}
 
-	/**
-	 * Safely deletes a file, preventing errors.
-	 */
-	private async safeUnlink(filePath: string) {
-		try {
-			await fs.unlink(filePath);
-		} catch (error) {
-			console.error("Error deleting existing file:", error);
+	public replaceFrontMatter(content: string, frontMatter: string): string {
+		const existingFrontMatter = this.getFrontMatter(content);
+		if (!existingFrontMatter) {
+			return frontMatter + content;
 		}
+		return content.replace(existingFrontMatter, frontMatter);
 	}
 
-	/**
-	 * Overwrites only the content of the existing file, preserving front matter.
-	 */
-	private async overwriteContentOnly(
-		existingFilePath: string,
-		newContent: string
-	): Promise<string> {
-		try {
-			const existingContent = await fs.readFile(existingFilePath, "utf8");
-			const existingFrontMatterMatch = existingContent.match(
-				/^---\n([\s\S]*?)\n---/
-			);
-			const newContentMatch = newContent.match(
-				/^---\n([\s\S]*?)\n---\n([\s\S]*)$/
-			);
+	public removeFrontMatter(content: string): string {
+		return content.replace(this.frontMatterRegex, "");
+	}
 
-			if (existingFrontMatterMatch && newContentMatch) {
-				const newBodyContent = newContentMatch[2];
-				const updatedContent = `${existingFrontMatterMatch[0]}\n${newBodyContent}`;
-				await fs.writeFile(existingFilePath, updatedContent, "utf8");
+	public getFrontMatter(content: string): string | null {
+		const frontMatter = content.match(this.frontMatterRegex);
+		return frontMatter ? frontMatter[0] : null;
+	}
+
+	private isValidFrontMatter(frontMatter: string): boolean {
+		return this.frontMatterRegex.test(frontMatter);
+	}
+
+	public getFrontMatterAttribute(frontMatter: string, attributeKey: string): string | null {
+		if (!this.isValidFrontMatter(frontMatter)) {
+			throw new Error("Invalid front matter");
+		}
+
+		const regex = new RegExp(`^${attributeKey}:\\s*(.*)$`, "m");
+		const match = frontMatter.match(regex);
+		return match ? match[1].trim() : null;
+	}
+
+	public setFrontMatterAttribute(frontMatter: string, attributeKey: string, attributeValue: string): string {
+		if (!this.isValidFrontMatter(frontMatter)) {
+			return `---\n${attributeKey}: ${attributeValue}\n---`;
+		}
+
+		const regex = new RegExp(`^(${attributeKey}:\\s*)(.*)$`, "m");
+		if (frontMatter.match(regex)) {
+			// 해당 속성이 이미 존재하면 업데이트
+			return frontMatter.replace(regex, `$1${attributeValue}`);
+		} else {
+			// 속성이 없으면 추가
+			const endOfFrontMatter = frontMatter.indexOf("---", 3);
+			if (endOfFrontMatter !== -1) {
+				return frontMatter.slice(0, endOfFrontMatter) + `\n${attributeKey}: ${attributeValue}\n` + frontMatter.slice(endOfFrontMatter);
 			} else {
-				// If front matter pattern doesn't match, overwrite entirely
-				await fs.writeFile(existingFilePath, newContent, "utf8");
+				// 예상치 못한 경우 새롭게 추가
+				return frontMatter + `\n${attributeKey}: ${attributeValue}\n---`;
 			}
-
-			return existingFilePath;
-		} catch (error) {
-			console.error("Error overwriting content:", error);
-			new Notice("An error occurred while overwriting content.");
-			return existingFilePath;
 		}
 	}
+}
 
-	// Constants 섹션에 추가
-	TAG_EXTRACTION_PROMPT = `
-	Given the following content, extract up to 10 relevant tags that best describe the main topics, technologies, concepts, or themes discussed.
-	Rules:
-	1. Return only the tags as a comma-separated list
-	2. Use lowercase for all tags
-	3. Replace spaces with hyphens in multi-word tags
-	4. Maximum 10 tags
-	5. No special characters except hyphens
-	6. No explanations, just the tags
+class LinkProcessor {
+	constructor(private app: App, private settings: JekyllExportSettings) {}
 
-	Content:
-	`;
+	public async processLinks(content: string): Promise<string> {
+		// Link 형태별 파싱 및 변환
+		const lines = content.split("\n");
+		const processedLines: string[] = [];
 
-	// JekyllExporter 클래스 내에 새로운 메소드 추가
-	private async extractTags(content: string): Promise<string[]> {
-		// useAutoTags가 false면 빈 배열 반환
-		if (!this.settings.useAutoTags) {
-			return [];
+		for (const line of lines) {
+			const newLine = await this.processLine(line);
+			processedLines.push(newLine);
 		}
 
+		return processedLines.join("\n").trim();
+	}
+
+	private async processLine(line: string): Promise<string> {
+		if (this.isMarkdownLink(line)) {
+			return line; // 이미 MD 링크는 그대로
+		}
+		if (this.isObsidianLink(line)) {
+			return this.convertObsidianLinkToMarkdown(line);
+		}
+		if (this.isObsidianImage(line)) {
+			return await this.convertObsidianImage(line);
+		}
+		return line; // 별도 처리 필요 없는 라인
+	}
+
+	private isMarkdownLink(line: string): boolean {
+		return /\[[^\]]*\]\([^)]*\)/.test(line);
+	}
+
+	private isObsidianLink(line: string): boolean {
+		// [[Link]] 혹은 [[Link|Title]] 형태이며 http가 포함되지 않은 경우
+		return /\[\[(.*?)\]\]/.test(line) && !line.includes("http") && !line.startsWith("![[");
+	}
+
+	private isObsidianImage(line: string): boolean {
+		return /^!\[\[.*?\]\]$/.test(line);
+	}
+
+	private convertObsidianLinkToMarkdown(line: string): string {
+		return line.replace(/\[\[(.*?)\]\]/g, (match, link) => {
+			const parts = link.split("|");
+			const title = parts[1] || parts[0];
+			const url = parts[0].toLowerCase().replace(/ /g, "-");
+			if (url.startsWith("http") || !url) {
+				return match;
+			}
+			return `[${title}](${url})`;
+		});
+	}
+
+	private async convertObsidianImage(line: string): Promise<string> {
+		const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".webp"];
+		const match = line.match(/!\[\[([^\]|]+)(?:\|(\d+))?\]\]/);
+		if (!match) return line;
+
+		const [, imageName, width] = match;
+		const resized = width ? `{:width="${width}px"}` : "";
+
+		if (imageName.startsWith("http")) {
+			return `![](${imageName})${resized}`;
+		}
+
+		if (!imageExtensions.some((ext) => imageName.toLowerCase().endsWith(ext))) {
+			return line;
+		}
+
+		const imageFile = this.app.vault.getFiles().find((f) => f.path.endsWith(imageName));
+		if (!imageFile) return line;
+
+		try {
+			const imageData = await this.app.vault.readBinary(imageFile);
+			const sanitizedImageName = path.basename(imageName).toLowerCase().replace(/\s+/g, "-");
+			const targetImagePath = path.join(this.settings.activeTargetFolder, this.settings.imageFolder, sanitizedImageName);
+			await fs.mkdir(path.dirname(targetImagePath), { recursive: true });
+			await fs.writeFile(targetImagePath, Buffer.from(imageData));
+
+			const newImagePath = path.join(this.settings.imageFolder, sanitizedImageName);
+			return `![](${newImagePath})${resized}`;
+		} catch (error) {
+			console.error(`Image processing error: ${error}`);
+			new Notice(`Error processing image: ${imageName}`);
+			return line;
+		}
+	}
+}
+
+class OpenAITagExtractor {
+	private TAG_EXTRACTION_PROMPT = `
+Given the following content, extract up to 10 relevant tags that best describe the main topics, technologies, concepts, or themes discussed.
+Rules:
+1. Return only the tags as a comma-separated list
+2. Use lowercase for all tags
+3. Replace spaces with hyphens in multi-word tags
+4. Maximum 10 tags
+5. No special characters except hyphens
+6. No explanations, just the tags
+
+Content:
+`;
+
+	constructor(private settings: JekyllExportSettings) {}
+
+	public async extractTags(content: string): Promise<string[]> {
+		if (!this.settings.useAutoTags) return [];
 		if (!this.settings.openaiApiKey) {
 			console.log("OpenAI API key not configured");
 			return [];
 		}
 
 		try {
-			const response = await fetch(
-				`${this.settings.openaiApiBaseUrl}/chat/completions`,
-				{
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Authorization: `Bearer ${this.settings.openaiApiKey}`,
-					},
-					body: JSON.stringify({
-						model: this.settings.openaiModel,
-						messages: [
-							{
-								role: "system",
-								content:
-									"You are a tag extraction assistant. Extract relevant tags from the given content.",
-							},
-							{
-								role: "user",
-								content: this.TAG_EXTRACTION_PROMPT + content,
-							},
-						],
-						temperature: 0.3,
-						max_tokens: 100,
-					}),
-				}
-			);
+			const response = await fetch(`${this.settings.openaiApiBaseUrl}/chat/completions`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${this.settings.openaiApiKey}`,
+				},
+				body: JSON.stringify({
+					model: this.settings.openaiModel,
+					messages: [
+						{
+							role: "system",
+							content: "You are a tag extraction assistant. Extract relevant tags from the given content.",
+						},
+						{
+							role: "user",
+							content: this.TAG_EXTRACTION_PROMPT + content,
+						},
+					],
+					temperature: 0.3,
+					max_tokens: 100,
+				}),
+			});
 
 			if (!response.ok) {
 				throw new Error(`API request failed: ${response.statusText}`);
@@ -788,12 +613,11 @@ class JekyllExporter {
 			const data = await response.json();
 			const tagString = data.choices[0].message.content.trim();
 
-			// 콤마로 구분된 태그를 배열로 변환하고 정리
 			const tags = tagString
 				.split(",")
 				.map((tag: string) => tag.trim().toLowerCase())
-				.filter((tag: string) => tag) // 빈 태그 제거
-				.slice(0, 10); // 최대 10개로 제한
+				.filter((tag: string) => tag)
+				.slice(0, 10);
 
 			return tags;
 		} catch (error) {
@@ -803,9 +627,224 @@ class JekyllExporter {
 	}
 }
 
+class AddPermaLinkAndNanoIDFileWriter {
+	constructor(private app: App, private frontMatterProcessor: FrontMatterProcessor) {}
+
+	public async writeContentToTargetPathAndSync(targetPath: string, content: string, file: TFile): Promise<string> {
+		async function fileExists(path: string): Promise<boolean> {
+			try {
+				await fs.access(path);
+				return true;
+			} catch {
+				return false;
+			}
+		}
+
+		let processedContent = content;
+		if (await fileExists(targetPath)) {
+			const existingContent = await fs.readFile(targetPath, "utf8");
+			const existingFrontMatter = this.frontMatterProcessor.getFrontMatter(existingContent);
+			if (existingFrontMatter) {
+				const existingNanoId = this.frontMatterProcessor.getFrontMatterAttribute(existingFrontMatter, "nanoId");
+				if (existingNanoId) {
+					processedContent = this.frontMatterProcessor.setFrontMatterAttribute(
+						this.frontMatterProcessor.replaceFrontMatter(content, existingFrontMatter),
+						"nanoId",
+						existingNanoId
+					);
+				} else {
+					processedContent = await this.addNanoID(content);
+				}
+			} else {
+				processedContent = await this.addNanoID(content);
+			}
+		}
+
+		processedContent = await this.addPermaLink(processedContent);
+		processedContent = this.frontMatterProcessor.removeEmptyLinesFromFrontMatter(processedContent);
+		await fs.writeFile(targetPath, processedContent, "utf8");
+		const originalContent = await this.app.vault.read(file);
+		// 원본파일에 덮어쓰기
+		await this.app.vault.modify(
+			file,
+			this.frontMatterProcessor.getFrontMatter(processedContent) + this.frontMatterProcessor.removeFrontMatter(originalContent)
+		);
+		return targetPath;
+	}
+
+	private async addPermaLink(content: string): Promise<string> {
+		const frontMatter = this.frontMatterProcessor.getFrontMatter(content);
+		if (frontMatter) {
+			let newFrontMatter = frontMatter;
+			let modified = false;
+
+			// nanoId가 없는 경우 생성 및 추가
+			let nanoId = this.frontMatterProcessor.getFrontMatterAttribute(frontMatter, "nanoId");
+			if (!nanoId) {
+				nanoId = alphaNumNanoId();
+				newFrontMatter = this.frontMatterProcessor.setFrontMatterAttribute(newFrontMatter, "nanoId", nanoId);
+				modified = true;
+			}
+
+			// permalink가 없는 경우 nanoId를 사용하여 생성 및 추가
+			const permalink = this.frontMatterProcessor.getFrontMatterAttribute(newFrontMatter, "permalink");
+			if (!permalink && nanoId) {
+				newFrontMatter = this.frontMatterProcessor.setFrontMatterAttribute(newFrontMatter, "permalink", `/${nanoId}/`);
+				modified = true;
+			}
+
+			// 수정된 프론트 매터가 있을 경우 교체
+			if (modified) {
+				return this.frontMatterProcessor.replaceFrontMatter(content, newFrontMatter);
+			}
+		}
+
+		return content;
+	}
+
+	private async addNanoID(content: string): Promise<string> {
+		const frontMatter = this.frontMatterProcessor.getFrontMatter(content);
+		if (frontMatter) {
+			if (this.frontMatterProcessor.getFrontMatterAttribute(frontMatter, "nanoId")) {
+				return content;
+			} else {
+				const newFrontMatter = this.frontMatterProcessor.setFrontMatterAttribute(frontMatter, "nanoId", alphaNumNanoId());
+				return this.frontMatterProcessor.replaceFrontMatter(content, newFrontMatter);
+			}
+		}
+
+		return content;
+	}
+}
+
+class OverwriteHandler {
+	constructor(
+		private app: App,
+		private frontMatterProcessor: FrontMatterProcessor,
+		private linkProcessor: LinkProcessor,
+		private addPermaLinkAndNanoIDFileWriter: AddPermaLinkAndNanoIDFileWriter
+	) {}
+
+	public async handleExistingFile(existingFilePath: string, file: TFile): Promise<string | null> {
+		const modal = new OverwriteModal(this.app);
+		modal.open();
+		const choice = await modal.getResult();
+
+		switch (choice) {
+			case OverwriteChoice.OverwriteDateAndContent:
+				let processedContent = await this.frontMatterProcessor.addTemplateFrontMatter(file);
+				processedContent = await this.linkProcessor.processLinks(processedContent);
+
+				return await this.addPermaLinkAndNanoIDFileWriter.writeContentToTargetPathAndSync(existingFilePath, processedContent, file);
+			case OverwriteChoice.OverwriteContentOnly:
+				const content = await this.app.vault.read(file);
+				return await this.overwriteContentOnly(existingFilePath, content, file);
+			case OverwriteChoice.Cancel:
+				return null;
+			default:
+				throw new Error("Overwrite choice is invalid");
+		}
+	}
+
+	private async overwriteContentOnly(existingFilePath: string, newContent: string, file: TFile): Promise<string> {
+		try {
+			const existingContent = await fs.readFile(existingFilePath, "utf8");
+			const existingFM = this.frontMatterProcessor.getFrontMatter(existingContent);
+			const newFM = this.frontMatterProcessor.getFrontMatter(newContent);
+
+			if (existingFM && newFM) {
+				const newBodyContent = this.frontMatterProcessor.removeFrontMatter(newContent);
+				const updatedContent = `${existingFM}\n${newBodyContent}`;
+				await this.addPermaLinkAndNanoIDFileWriter.writeContentToTargetPathAndSync(existingFilePath, updatedContent, file);
+			} else {
+				await this.addPermaLinkAndNanoIDFileWriter.writeContentToTargetPathAndSync(existingFilePath, newContent, file);
+			}
+			return existingFilePath;
+		} catch (error) {
+			console.error("Error overwriting content:", error);
+			new Notice("An error occurred while overwriting content.");
+			return existingFilePath;
+		}
+	}
+}
+
+// ========================= JekyllExporter =========================
+
+class JekyllExporter {
+	constructor(
+		private app: App,
+		private settings: JekyllExportSettings,
+		private frontMatterProcessor: FrontMatterProcessor,
+		private linkProcessor: LinkProcessor,
+		private overwriteHandler: OverwriteHandler,
+		private addPermaLinkAndNanoIDFileWriter: AddPermaLinkAndNanoIDFileWriter
+	) {}
+
+	public async exportFile(file: TFile): Promise<string | null> {
+		const targetDir = this.settings.activeTargetFolder;
+		if (!targetDir) {
+			new Notice("No active target folder set.");
+			return null;
+		}
+
+		try {
+			await fs.access(targetDir);
+		} catch {
+			new Notice("Active target folder does not exist.");
+			return null;
+		}
+
+		return await this.processFile(file, targetDir);
+	}
+
+	private async processFile(file: TFile, targetDir: string): Promise<string | null> {
+		try {
+			const fileName = this.createJekyllFileName(file);
+			const relativeDir = path.dirname(file.path);
+			const targetPath = path.join(targetDir, relativeDir, "_posts", fileName);
+			await fs.mkdir(path.dirname(targetPath), { recursive: true });
+
+			const existingFilePath = await this.findExistingFile(path.dirname(targetPath), file);
+			if (existingFilePath) {
+				return await this.overwriteHandler.handleExistingFile(existingFilePath, file);
+			} else {
+				let content = await this.app.vault.read(file);
+				content = await this.frontMatterProcessor.addTemplateFrontMatter(file);
+				content = await this.linkProcessor.processLinks(content);
+				await this.addPermaLinkAndNanoIDFileWriter.writeContentToTargetPathAndSync(targetPath, content, file);
+				return targetPath;
+			}
+		} catch (error) {
+			console.error("Error processing file:", error);
+			new Notice("An error occurred while processing the file.");
+			return null;
+		}
+	}
+
+	private createJekyllFileName(file: TFile): string {
+		const date = new Date().toISOString().split("T")[0];
+		const title = file.basename.replace(/\s+/g, "-");
+		return `${date}-${title}.md`;
+	}
+
+	private async findExistingFile(targetPostsDir: string, file: TFile): Promise<string | null> {
+		try {
+			const files = await fs.readdir(targetPostsDir);
+			const currentTitle = file.basename.replace(/\s+/g, "-");
+			const existingFile = files.find((f) => {
+				const match = f.match(/^\d{4}-\d{2}-\d{2}-(.*)\.md$/);
+				return match && match[1] === currentTitle;
+			});
+			return existingFile ? path.join(targetPostsDir, existingFile) : null;
+		} catch (error) {
+			console.error("Error searching for existing file:", error);
+			return null;
+		}
+	}
+}
+
 // ========================= Settings Tab =========================
 
-// Plugin settings tab
 class JekyllExportSettingTab extends PluginSettingTab {
 	plugin: JekyllExportPlugin;
 	newFolderInput!: TextComponent;
@@ -815,29 +854,20 @@ class JekyllExportSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
-	// Display the settings UI
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-
-		// 최상위 컨테이너에 플러그인 전용 클래스 추가
 		containerEl.addClass("jekyll-export-plugin");
 		containerEl.addClass("jekyll-settings-container");
 
-		// 타겟 폴더 섹션
+		// Target folders
 		const targetSection = containerEl.createDiv("jekyll-settings-section");
 		targetSection.createEl("h2", { text: "Target Folders" });
 
 		const foldersContainer = targetSection.createDiv("folders-container");
-
-		// 기존 폴더 목록 표시
 		this.plugin.settings.targetFolders.forEach((folder, index) => {
 			const folderDiv = foldersContainer.createDiv("folder-item");
-
-			folderDiv.createSpan({
-				text: folder,
-				cls: "folder-path",
-			});
+			folderDiv.createSpan({ text: folder, cls: "folder-path" });
 
 			new ButtonComponent(folderDiv)
 				.setButtonText(BUTTON_DELETE)
@@ -846,18 +876,16 @@ class JekyllExportSettingTab extends PluginSettingTab {
 				.onClick(async () => {
 					this.plugin.settings.targetFolders.splice(index, 1);
 					if (this.plugin.settings.activeTargetFolder === folder) {
-						this.plugin.settings.activeTargetFolder =
-							this.plugin.settings.targetFolders[0] || "";
+						this.plugin.settings.activeTargetFolder = this.plugin.settings.targetFolders[0] || "";
 					}
 					await this.plugin.saveSettings();
 					this.display();
 				});
 		});
 
-		// 새 폴더 추가 설정
 		new Setting(targetSection)
 			.setName("Add New Target Folder")
-			.setDesc("Jekyll site root path (e.g., /path/to/jekyll/site)")
+			.setDesc("Jekyll site root path")
 			.addText((text) => {
 				this.newFolderInput = text;
 				text.inputEl.addClass("folder-input");
@@ -869,21 +897,12 @@ class JekyllExportSettingTab extends PluginSettingTab {
 					.setClass("jekyll-button")
 					.onClick(async () => {
 						const value = this.newFolderInput.getValue().trim();
-						if (
-							value &&
-							!this.plugin.settings.targetFolders.includes(value)
-						) {
+						if (value && !this.plugin.settings.targetFolders.includes(value)) {
 							try {
-								// Validate folder path
 								await fs.access(value);
 								this.plugin.settings.targetFolders.push(value);
-								// Activate the first added folder
-								if (
-									this.plugin.settings.targetFolders
-										.length === 1
-								) {
-									this.plugin.settings.activeTargetFolder =
-										value;
+								if (this.plugin.settings.targetFolders.length === 1) {
+									this.plugin.settings.activeTargetFolder = value;
 								}
 								await this.plugin.saveSettings();
 								this.newFolderInput.setValue("");
@@ -897,7 +916,7 @@ class JekyllExportSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// 활성 폴더 선택 섹션
+		// Active folder
 		const activeSection = containerEl.createDiv("jekyll-settings-section");
 		activeSection.createEl("h2", { text: "Active Target Folder" });
 
@@ -908,12 +927,9 @@ class JekyllExportSettingTab extends PluginSettingTab {
 				this.plugin.settings.targetFolders.forEach((folder) => {
 					dropdown.addOption(folder, folder);
 				});
-				dropdown.setValue(
-					this.plugin.settings.activeTargetFolder || ""
-				);
+				dropdown.setValue(this.plugin.settings.activeTargetFolder || "");
 				dropdown.selectEl.addClass("folder-select");
 				dropdown.onChange(async (value) => {
-					// Validate selected folder
 					try {
 						await fs.access(value);
 						this.plugin.settings.activeTargetFolder = value;
@@ -925,18 +941,17 @@ class JekyllExportSettingTab extends PluginSettingTab {
 				});
 			});
 
-		// Front Matter 섹션
-		const frontMatterSection = containerEl.createDiv(
-			"jekyll-settings-section"
-		);
-		frontMatterSection.createEl("h2", { text: "Front Matter Settings" });
+		// Front matter
+		const fmSection = containerEl.createDiv("jekyll-settings-section");
+		fmSection.createEl("h2", { text: "Front Matter Settings" });
 
-		new Setting(frontMatterSection)
+		new Setting(fmSection)
 			.setName("Front Matter Template")
-			.setDesc("Default Front Matter template for new documents")
+			.setDesc("Default Front Matter template")
 			.addTextArea((text) => {
 				text.inputEl.addClass("front-matter-textarea");
-				text.setPlaceholder(DEFAULT_FRONT_MATTER_TEMPLATE)
+				text
+					.setPlaceholder(DEFAULT_FRONT_MATTER_TEMPLATE)
 					.setValue(this.plugin.settings.frontMatterTemplate)
 					.onChange(async (value: string) => {
 						this.plugin.settings.frontMatterTemplate = value;
@@ -944,7 +959,7 @@ class JekyllExportSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// 이미지 설정 섹션
+		// Images
 		const imageSection = containerEl.createDiv("jekyll-settings-section");
 		imageSection.createEl("h2", { text: "Image Settings" });
 
@@ -952,7 +967,8 @@ class JekyllExportSettingTab extends PluginSettingTab {
 			.setName("Image Folder")
 			.setDesc("Image storage path in Jekyll site")
 			.addText((text) => {
-				text.setPlaceholder("assets/img")
+				text
+					.setPlaceholder("assets/img")
 					.setValue(this.plugin.settings.imageFolder)
 					.onChange(async (value) => {
 						this.plugin.settings.imageFolder = value.trim();
@@ -960,7 +976,7 @@ class JekyllExportSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// OpenAI 설정 섹션
+		// OpenAI
 		const openaiSection = containerEl.createDiv("jekyll-settings-section");
 		openaiSection.createEl("h2", { text: "OpenAI Settings" });
 
@@ -968,7 +984,8 @@ class JekyllExportSettingTab extends PluginSettingTab {
 			.setName("API Base URL")
 			.setDesc("OpenAI API base URL")
 			.addText((text) => {
-				text.setValue(this.plugin.settings.openaiApiBaseUrl)
+				text
+					.setValue(this.plugin.settings.openaiApiBaseUrl)
 					.setPlaceholder("https://api.openai.com/v1")
 					.onChange(async (value) => {
 						this.plugin.settings.openaiApiBaseUrl = value.trim();
@@ -976,14 +993,7 @@ class JekyllExportSettingTab extends PluginSettingTab {
 					});
 			});
 
-		// OpenAI 모델 상수 추가
-		const OPENAI_MODELS = [
-			"gpt-4",
-			"gpt-4o-mini",
-			"gpt-4-turbo",
-			"gpt-3.5-turbo",
-			"custom",
-		];
+		const OPENAI_MODELS = ["gpt-4", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo", "custom"];
 
 		let customModelInput: TextComponent;
 
@@ -991,61 +1001,45 @@ class JekyllExportSettingTab extends PluginSettingTab {
 			.setName("Model")
 			.setDesc("Select OpenAI model or enter custom model name")
 			.addDropdown((dropdown) => {
-				OPENAI_MODELS.forEach((model) => {
-					dropdown.addOption(model, model);
-				});
 				const currentModel = this.plugin.settings.openaiModel;
-				// 현재 설정된 모델이 기본 목록에 없으면 custom 선택
-				const value = OPENAI_MODELS.includes(currentModel)
-					? currentModel
-					: "custom";
+				const value = OPENAI_MODELS.includes(currentModel) ? currentModel : "custom";
+				OPENAI_MODELS.forEach((model) => dropdown.addOption(model, model));
 				dropdown.setValue(value);
-				dropdown.onChange(async (value) => {
-					if (value === "custom") {
+				dropdown.onChange(async (val) => {
+					if (val === "custom") {
 						customModelInput.inputEl.style.display = "block";
 					} else {
 						customModelInput.inputEl.style.display = "none";
-						this.plugin.settings.openaiModel = value;
+						this.plugin.settings.openaiModel = val;
 						await this.plugin.saveSettings();
 					}
 				});
 			})
 			.addText((text) => {
 				customModelInput = text;
-				text.setPlaceholder("Enter custom model name")
-					.setValue(
-						OPENAI_MODELS.includes(this.plugin.settings.openaiModel)
-							? ""
-							: this.plugin.settings.openaiModel
-					)
+				text
+					.setPlaceholder("Enter custom model name")
+					.setValue(OPENAI_MODELS.includes(this.plugin.settings.openaiModel) ? "" : this.plugin.settings.openaiModel)
 					.onChange(async (value) => {
 						if (value) {
 							this.plugin.settings.openaiModel = value.trim();
 							await this.plugin.saveSettings();
 						}
 					});
-				// 초기 상태 설정
-				text.inputEl.style.display = OPENAI_MODELS.includes(
-					this.plugin.settings.openaiModel
-				)
-					? "none"
-					: "block";
+				text.inputEl.style.display = OPENAI_MODELS.includes(this.plugin.settings.openaiModel) ? "none" : "block";
 			});
 
 		new Setting(openaiSection)
 			.setName("API Key")
 			.setDesc("Your OpenAI API key")
 			.addText((text) => {
-				text
-					.setValue(this.plugin.settings.openaiApiKey)
-					.setPlaceholder("sk-...").inputEl.type = "password";
+				text.setValue(this.plugin.settings.openaiApiKey).setPlaceholder("sk-...").inputEl.type = "password";
 				text.onChange(async (value) => {
 					this.plugin.settings.openaiApiKey = value.trim();
 					await this.plugin.saveSettings();
 				});
 			});
 
-		// 테스트 버튼 추가
 		new Setting(openaiSection)
 			.setName("Test API Connection")
 			.setDesc("Test your OpenAI API connection")
@@ -1055,78 +1049,74 @@ class JekyllExportSettingTab extends PluginSettingTab {
 					.setClass("jekyll-button")
 					.onClick(async () => {
 						try {
-							const response = await fetch(
-								`${this.plugin.settings.openaiApiBaseUrl}/chat/completions`,
-								{
-									method: "POST",
-									headers: {
-										"Content-Type": "application/json",
-										Authorization: `Bearer ${this.plugin.settings.openaiApiKey}`,
-									},
-									body: JSON.stringify({
-										model: this.plugin.settings.openaiModel,
-										messages: [
-											{
-												role: "user",
-												content:
-													"Hello! This is a test message.",
-											},
-										],
-									}),
-								}
-							);
+							const response = await fetch(`${this.plugin.settings.openaiApiBaseUrl}/chat/completions`, {
+								method: "POST",
+								headers: {
+									"Content-Type": "application/json",
+									Authorization: `Bearer ${this.plugin.settings.openaiApiKey}`,
+								},
+								body: JSON.stringify({
+									model: this.plugin.settings.openaiModel,
+									messages: [
+										{
+											role: "user",
+											content: "Hello! This is a test message.",
+										},
+									],
+								}),
+							});
 
 							if (response.ok) {
 								new Notice("API connection successful!");
 							} else {
 								const error = await response.json();
-								new Notice(
-									`API connection failed: ${
-										error.error?.message || "Unknown error"
-									}`
-								);
+								new Notice(`API connection failed: ${error.error?.message || "Unknown error"}`);
 							}
-						} catch (error) {
-							new Notice(
-								`API connection failed: ${error.message}`
-							);
+						} catch (error: any) {
+							new Notice(`API connection failed: ${error.message}`);
 						}
 					});
 			});
 
 		new Setting(openaiSection)
 			.setName("Auto Tag Generation")
-			.setDesc(
-				"Automatically generate tags using OpenAI when no tags are present"
-			)
+			.setDesc("Automatically generate tags using OpenAI")
 			.addToggle((toggle) => {
-				toggle
-					.setValue(this.plugin.settings.useAutoTags)
-					.onChange(async (value) => {
-						this.plugin.settings.useAutoTags = value;
-						await this.plugin.saveSettings();
-					});
+				toggle.setValue(this.plugin.settings.useAutoTags).onChange(async (value) => {
+					this.plugin.settings.useAutoTags = value;
+					await this.plugin.saveSettings();
+				});
 			});
 	}
 }
 
 // ========================= Plugin Class =========================
 
-// Main plugin class
 export default class JekyllExportPlugin extends Plugin {
 	settings: JekyllExportSettings;
 	private exporter!: JekyllExporter;
 
 	async onload() {
-		// CSS 스타일 주입
 		injectStyles(MODAL_CSS);
-		injectStyles(SETTINGS_CSS); // 새로운 CSS 추가
+		injectStyles(SETTINGS_CSS);
 
-		// Load settings
 		await this.loadSettings();
-		this.exporter = new JekyllExporter(this.app, this.settings);
 
-		// Add ribbon icon: Export active markdown file to Jekyll
+		const tagExtractor = new OpenAITagExtractor(this.settings);
+		const frontMatterProcessor = new FrontMatterProcessor(this.app, this.settings, tagExtractor);
+		const addPermaLinkAndNanoIDFileWriter = new AddPermaLinkAndNanoIDFileWriter(this.app, frontMatterProcessor);
+		const linkProcessor = new LinkProcessor(this.app, this.settings);
+		const overwriteHandler = new OverwriteHandler(this.app, frontMatterProcessor, linkProcessor, addPermaLinkAndNanoIDFileWriter);
+
+		this.exporter = new JekyllExporter(
+			this.app,
+			this.settings,
+			frontMatterProcessor,
+			linkProcessor,
+			overwriteHandler,
+			addPermaLinkAndNanoIDFileWriter
+		);
+
 		this.addRibbonIcon(ICON_UPLOAD, "Export to Jekyll", () => {
 			const activeFile = this.app.workspace.getActiveFile();
 			if (activeFile && activeFile.extension === "md") {
@@ -1136,12 +1126,12 @@ export default class JekyllExportPlugin extends Plugin {
 			}
 		});
 
-		// Add file context menu: Right-click -> Export to Jekyll
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file) => {
 				if (file instanceof TFile && file.extension === "md") {
 					menu.addItem((item) => {
-						item.setTitle(BUTTON_EXPORT)
+						item
+							.setTitle(BUTTON_EXPORT)
 							.setIcon(ICON_UPLOAD)
 							.onClick(() => this.exportToJekyll(file as TFile));
 					});
@@ -1149,7 +1139,6 @@ export default class JekyllExportPlugin extends Plugin {
 			})
 		);
 
-		// Add settings tab
 		this.addSettingTab(new JekyllExportSettingTab(this.app, this));
 	}
 
@@ -1162,19 +1151,14 @@ export default class JekyllExportPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	// Method to trigger export
-	async exportToJekyll(file: TFile) {
+	private async exportToJekyll(file: TFile) {
 		try {
 			const targetPath = await this.exporter.exportFile(file);
-
-			// If export was canceled or errored
 			if (!targetPath) {
 				new Notice("Export was cancelled or an error occurred.");
 				return;
 			}
-
 			await this.saveSettings();
-
 			new Notice("Jekyll export completed. Path: " + targetPath);
 		} catch (error) {
 			console.error("Error during Jekyll export:", error);
