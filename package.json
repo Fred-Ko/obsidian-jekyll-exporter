@@ -25,5 +25,9 @@
 		"obsidian": "latest",
 		"tslib": "2.3.1",
 		"typescript": "^5.7.2"
+	},
+	"dependencies": {
+		"nanoid": "^5.0.9",
+		"yaml": "^2.6.1"
 	}
 }

@@ -2,6 +2,7 @@ import * as fs from "fs/promises";
 import { customAlphabet } from "nanoid";
 import { App, ButtonComponent, Modal, Notice, Plugin, PluginSettingTab, Setting, TextComponent, TFile } from "obsidian";
 import * as path from "path";
+import * as yaml from "yaml";
 // ========================= Constants =========================
 
 const BUTTON_TEXT_OVERWRITE_FRONTMATTER_AND_CONTENT = "Overwrite Date and Content";
@@ -341,7 +342,7 @@ class OverwriteModal extends Modal {
 // ========================= SRP Classes =========================
 
 class FrontMatterProcessor {
-	private readonly frontMatterRegex = /^---\r?\n[\s\S]*?\r?\n---/;
+	private readonly frontMatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\n/;
 	private readonly frontMatterProcessors = {
 		"{{title}}": (title: string) => title,
 		"{{date}}": () => new Date().toISOString().split("T")[0],
@@ -350,6 +351,12 @@ class FrontMatterProcessor {
 	};
 
 	constructor(private app: App, private settings: JekyllExportSettings, private openAITagExtractor: OpenAITagExtractor) {}
+
+	public addEmptyLineBetweenFrontMatterAndContent(content: string): string {
+		const body = this.removeFrontMatter(content);
+		if (body.startsWith("\n")) return content;
+		return content.replace(this.frontMatterRegex, (match) => match + "\n\n");
+	}
 
 	public async addTemplateFrontMatter(file: TFile): Promise<string> {
 		const content = await this.app.vault.read(file);
@@ -362,23 +369,15 @@ class FrontMatterProcessor {
 		if (!hasFrontMatter) {
 			let newFrontMatter = this.settings.frontMatterTemplate;
 			Object.entries(this.frontMatterProcessors).forEach(([key, processor]) => {
-				switch (key) {
-					case "{{title}}":
-						newFrontMatter = newFrontMatter.replace(key, this.frontMatterProcessors[key](title));
-						break;
-					case "{{date}}":
-						newFrontMatter = newFrontMatter.replace(key, this.frontMatterProcessors[key]());
-						break;
-					case "{{datetime}}":
-						newFrontMatter = newFrontMatter.replace(key, this.frontMatterProcessors[key]());
-						break;
-					case "{{nanoId}}":
-						newFrontMatter = newFrontMatter.replace(key, this.frontMatterProcessors[key]());
-						break;
+				if (newFrontMatter.includes(key)) {
+					newFrontMatter = newFrontMatter.replace(key, processor(title));
 				}
 			});
 
-			newFrontMatter = this.setFrontMatterAttribute(newFrontMatter, "tags", tags.join(", "));
+			// YAML 파싱 후 tags 설정
+			const fmObj = yaml.parse(newFrontMatter) || {};
+			fmObj.tags = tags;
+			newFrontMatter = "---\n" + yaml.stringify(fmObj).trim() + "\n---\n";
 
 			return newFrontMatter + content;
 		}
@@ -387,41 +386,22 @@ class FrontMatterProcessor {
 	}
 
 	public removeEmptyLinesFromFrontMatter(content: string): string {
-		const match = content.match(this.frontMatterRegex);
-		if (!match) {
-			// 프론트매터가 없으면 원본 콘텐츠 반환
-			return content;
-		}
+		const frontMatter = this.getFrontMatter(content);
+		if (!frontMatter) return content;
 
-		const frontMatter = match[0];
-		const lines = frontMatter.split(/\r?\n/);
-		// 프론트매터의 시작과 끝을 제외한 중간 부분에서 빈 줄 제거
-		const cleanedLines = lines.filter((line, index) => {
-			// 첫 번째와 마지막 줄(`---`)은 유지
-			if (index === 0 || index === lines.length - 1) {
-				return true;
-			}
-			// 중간의 빈 줄은 제거
-			return line.trim() !== "";
-		});
+		// frontMatter 파싱
+		const fmContent = frontMatter.replace(/^---\r?\n/, "").replace(/\r?\n---\n?$/, "");
+		const fmObj = yaml.parse(fmContent) || {};
 
-		const cleanedFrontMatter = cleanedLines.join("\n");
-		// 원본 콘텐츠에서 기존 프론트매터를 제거하고, 정리된 프론트매터로 대체
+		// 다시 문자열화할 때 yaml 라이브러리가 필요없는 빈 줄 정리를 자동으로 처리
+		const cleanedFrontMatter = "---\n" + yaml.stringify(fmObj).trim() + "\n---";
 		const updatedContent = content.replace(this.frontMatterRegex, cleanedFrontMatter);
 
-		return updatedContent;
+		return this.addEmptyLineBetweenFrontMatterAndContent(updatedContent);
 	}
 
 	public hasFrontMatter(content: string): boolean {
 		return this.frontMatterRegex.test(content);
-	}
-
-	public replaceFrontMatter(content: string, frontMatter: string): string {
-		const existingFrontMatter = this.getFrontMatter(content);
-		if (!existingFrontMatter) {
-			return frontMatter + content;
-		}
-		return content.replace(existingFrontMatter, frontMatter);
 	}
 
 	public removeFrontMatter(content: string): string {
@@ -429,8 +409,8 @@ class FrontMatterProcessor {
 	}
 
 	public getFrontMatter(content: string): string | null {
-		const frontMatter = content.match(this.frontMatterRegex);
-		return frontMatter ? frontMatter[0] : null;
+		const match = content.match(this.frontMatterRegex);
+		return match ? match[0] : null;
 	}
 
 	private isValidFrontMatter(frontMatter: string): boolean {
@@ -442,30 +422,40 @@ class FrontMatterProcessor {
 			throw new Error("Invalid front matter");
 		}
 
-		const regex = new RegExp(`^${attributeKey}:\\s*(.*)$`, "m");
-		const match = frontMatter.match(regex);
-		return match ? match[1].trim() : null;
+		const fmContent = frontMatter.replace(/^---\r?\n/, "").replace(/\r?\n---\n?$/, "");
+		const fmObj = yaml.parse(fmContent) || {};
+		const value = fmObj[attributeKey];
+		if (value === undefined || value === null) return null;
+		return Array.isArray(value) ? value.join(", ") : value.toString();
 	}
 
-	public setFrontMatterAttribute(frontMatter: string, attributeKey: string, attributeValue: string): string {
+	public replaceFrontMatter(content: string, frontMatter: string): string {
+		const existingFrontMatter = this.getFrontMatter(content);
+		if (!existingFrontMatter) {
+			return frontMatter + "\n\n" + content;
+		}
+		return content.replace(existingFrontMatter, frontMatter);
+	}
+
+	public setFrontMatterAttribute(frontMatter: string, attributeKey: string, attributeValue: string | string[]): string {
 		if (!this.isValidFrontMatter(frontMatter)) {
-			return `---\n${attributeKey}: ${attributeValue}\n---`;
+			throw new Error("Invalid front matter");
 		}
 
-		const regex = new RegExp(`^(${attributeKey}:\\s*)(.*)$`, "m");
-		if (frontMatter.match(regex)) {
-			// 해당 속성이 이미 존재하면 업데이트
-			return frontMatter.replace(regex, `$1${attributeValue}`);
+		const fmContent = frontMatter.replace(/^---\r?\n/, "").replace(/\r?\n---\n?$/, "");
+		const fmObj = yaml.parse(fmContent) || {};
+
+		// attributeValue가 배열일 경우 배열로 설정, 문자열은 문자열 그대로
+		if (Array.isArray(attributeValue)) {
+			fmObj[attributeKey] = attributeValue;
 		} else {
-			// 속성이 없으면 추가
-			const endOfFrontMatter = frontMatter.indexOf("---", 3);
-			if (endOfFrontMatter !== -1) {
-				return frontMatter.slice(0, endOfFrontMatter) + `\n${attributeKey}: ${attributeValue}\n` + frontMatter.slice(endOfFrontMatter);
-			} else {
-				// 예상치 못한 경우 새롭게 추가
-				return frontMatter + `\n${attributeKey}: ${attributeValue}\n---`;
-			}
+			// 쉼표로 구분된 문자열이면 배열로 처리할 수도 있으나, 여기서는 명시적으로 문자열로 처리
+			// 필요한 경우 parse해 배열화하는 로직 추가 가능
+			fmObj[attributeKey] = attributeValue;
 		}
+
+		const updated = "---\n" + yaml.stringify(fmObj).trim() + "\n---\n";
+		return updated;
 	}
 }
 
