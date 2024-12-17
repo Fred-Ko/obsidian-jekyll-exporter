@@ -317,7 +317,7 @@ class FrontMatterProcessor {
 			if (key && value) {
 				switch (value) {
 					case "{{title}}":
-						frontMatter[key] = this.frontMatterProcessor[value](file.name);
+						frontMatter[key] = this.frontMatterProcessor[value](file.name.replace(/\.md$/i, ""));
 						break;
 					case "{{date}}":
 						frontMatter[key] = this.frontMatterProcessor[value]();
