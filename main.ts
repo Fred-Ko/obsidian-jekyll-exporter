@@ -279,7 +279,7 @@ function alphaNumNanoId(): string {
 class FrontMatterProcessor {
 	private readonly frontMatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\n/;
 	private frontMatterProcessor = {
-		"{{title}}": (title: string) => title,
+		"{{title}}": (title: string) => title.replace(/\.md$/i, ""),
 		"{{date}}": () => new Date().toISOString().split("T")[0],
 		"{{datetime}}": () => new Date().toISOString(),
 	};
