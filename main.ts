@@ -3,7 +3,35 @@ import { customAlphabet } from "nanoid";
 import { App, ButtonComponent, Modal, Notice, Plugin, PluginSettingTab, Setting, TextComponent, TFile } from "obsidian";
 import * as path from "path";
 import * as yaml from "yaml";
-// ========================= Constants =========================
+
+interface JekyllExportSettings {
+	targetFolders: string[];
+	excludePatterns: string[];
+	frontMatterTemplate: string;
+	imageFolder: string;
+	attachmentSearchMode: "vault" | "specified" | "same" | "subfolder";
+	customAttachmentFolder: string;
+	activeTargetFolder: string;
+	openaiApiBaseUrl: string;
+	openaiModel: string;
+	openaiApiKey: string;
+	useAutoTags: boolean;
+}
+const DEFAULT_FRONT_MATTER_TEMPLATE = "---\ntitle: {{title}}\ndate: {{date}}\ntags: {{tags}}\n---\n";
+
+const DEFAULT_SETTINGS: JekyllExportSettings = {
+	targetFolders: [],
+	excludePatterns: [],
+	frontMatterTemplate: DEFAULT_FRONT_MATTER_TEMPLATE,
+	imageFolder: "assets/images",
+	attachmentSearchMode: "vault",
+	customAttachmentFolder: "",
+	activeTargetFolder: "",
+	openaiApiBaseUrl: "https://api.openai.com/v1",
+	openaiModel: "gpt-3.5-turbo",
+	openaiApiKey: "",
+	useAutoTags: false,
+};
 
 const BUTTON_TEXT_OVERWRITE_FRONTMATTER_AND_CONTENT = "Overwrite Date and Content";
 const BUTTON_TEXT_OVERWRITE_CONTENT_ONLY = "Overwrite Content Only";
@@ -14,8 +42,6 @@ const BUTTON_ADD = "Add";
 const BUTTON_DELETE = "Delete";
 const BUTTON_EXPORT = "Export to Jekyll";
 const ICON_UPLOAD = "upload";
-
-const DEFAULT_FRONT_MATTER_TEMPLATE = "---\ntitle: {{title}}\ndate: {{date}}\ntags: {{tags}}\n---\n";
 
 const MODAL_CSS = `
 .overwrite-modal-content {
@@ -231,48 +257,9 @@ const SETTINGS_CSS = `
 }
 `;
 
-enum OverwriteChoice {
-	OverwriteDateAndContent = 1,
-	OverwriteContentOnly,
-	Cancel,
-}
-
-// ========================= Interfaces =========================
-
-interface JekyllExportSettings {
-	targetFolders: string[];
-	excludePatterns: string[];
-	frontMatterTemplate: string;
-	imageFolder: string;
-	attachmentSearchMode: "vault" | "specified" | "same" | "subfolder";
-	customAttachmentFolder: string;
-	activeTargetFolder: string;
-	openaiApiBaseUrl: string;
-	openaiModel: string;
-	openaiApiKey: string;
-	useAutoTags: boolean;
-}
-
-const DEFAULT_SETTINGS: JekyllExportSettings = {
-	targetFolders: [],
-	excludePatterns: [],
-	frontMatterTemplate: DEFAULT_FRONT_MATTER_TEMPLATE,
-	imageFolder: "assets/images",
-	attachmentSearchMode: "vault",
-	customAttachmentFolder: "",
-	activeTargetFolder: "",
-	openaiApiBaseUrl: "https://api.openai.com/v1",
-	openaiModel: "gpt-3.5-turbo",
-	openaiApiKey: "",
-	useAutoTags: false,
+type FrontMatterObject = {
+	[key: string]: string | string[];
 };
-
-// ========================= Utility Functions =========================
-
-function alphaNumNanoId(): string {
-	const alphaNum = "123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-	return customAlphabet(alphaNum, 25)();
-}
 
 function injectStyles(css: string) {
 	const style = document.createElement("style");
@@ -280,189 +267,115 @@ function injectStyles(css: string) {
 	document.head.appendChild(style);
 }
 
-function createStyledButton(container: HTMLElement, text: string, isPrimary: boolean, callback: () => void): ButtonComponent {
-	const btn = new ButtonComponent(container).setButtonText(text).onClick(callback);
-	btn.buttonEl.classList.add(isPrimary ? "button-primary" : "button-secondary");
-	return btn;
+function sentinize(fileName: string) {
+	return fileName.replace(/ /g, "-");
 }
 
-// ========================= Modal Class =========================
-
-class OverwriteModal extends Modal {
-	private result: Promise<OverwriteChoice>;
-	private resolvePromise!: (value: OverwriteChoice) => void;
-
-	constructor(app: App) {
-		super(app);
-		this.result = new Promise((resolve) => {
-			this.resolvePromise = resolve;
-		});
-	}
-
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.addClass("overwrite-modal-content");
-
-		const title = contentEl.createEl("h2", { text: MODAL_TITLE });
-		title.addClass("overwrite-modal-title");
-
-		const description = contentEl.createEl("p", {
-			text: MODAL_DESCRIPTION,
-		});
-		description.addClass("overwrite-modal-description");
-
-		const buttonContainer = contentEl.createDiv();
-		buttonContainer.addClass("overwrite-modal-button-container");
-
-		createStyledButton(buttonContainer, BUTTON_TEXT_OVERWRITE_FRONTMATTER_AND_CONTENT, true, () => {
-			this.resolvePromise(OverwriteChoice.OverwriteDateAndContent);
-			this.close();
-		});
-
-		createStyledButton(buttonContainer, BUTTON_TEXT_OVERWRITE_CONTENT_ONLY, false, () => {
-			this.resolvePromise(OverwriteChoice.OverwriteContentOnly);
-			this.close();
-		});
-
-		createStyledButton(buttonContainer, BUTTON_TEXT_CANCEL, false, () => {
-			this.resolvePromise(OverwriteChoice.Cancel);
-			this.close();
-		});
-	}
-
-	onClose() {
-		this.contentEl.empty();
-	}
-
-	async getResult(): Promise<OverwriteChoice> {
-		return this.result;
-	}
+function alphaNumNanoId(): string {
+	const alphaNum = "123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	return customAlphabet(alphaNum, 25)();
 }
-
-// ========================= SRP Classes =========================
 
 class FrontMatterProcessor {
 	private readonly frontMatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\n/;
-	private readonly frontMatterProcessors = {
+	private frontMatterProcessor = {
 		"{{title}}": (title: string) => title,
 		"{{date}}": () => new Date().toISOString().split("T")[0],
 		"{{datetime}}": () => new Date().toISOString(),
-		"{{nanoId}}": () => alphaNumNanoId(),
 	};
 
-	constructor(private app: App, private settings: JekyllExportSettings, private openAITagExtractor: OpenAITagExtractor) {}
+	constructor(private app: App, private settings: JekyllExportSettings) {}
 
-	public addEmptyLineBetweenFrontMatterAndContent(content: string): string {
-		const body = this.removeFrontMatter(content);
-		if (body.startsWith("\n")) return content;
-		return content.replace(this.frontMatterRegex, (match) => match + "\n\n");
+	public async parse(content: string): Promise<{ frontMatter: FrontMatterObject; contentBody: string }> {
+		const frontMatterMatch = content.match(this.frontMatterRegex);
+
+		if (frontMatterMatch) {
+			try {
+				const frontMatter = yaml.parse(frontMatterMatch[1]);
+				const contentBody = content.slice(frontMatterMatch[0].length);
+				return { frontMatter, contentBody };
+			} catch (error) {
+				new Notice("Front matter is not valid YAML");
+				throw new Error("Front matter is not valid YAML");
+			}
+		}
+
+		return { frontMatter: {}, contentBody: content };
 	}
 
-	public async addTemplateFrontMatter(file: TFile): Promise<string> {
-		const content = await this.app.vault.read(file);
-		const tags = await this.openAITagExtractor.extractTags(content);
+	public async getFrontMatterFromTemplate(template: string, file: TFile): Promise<FrontMatterObject> {
+		const templateWithoutDashes = template.replace(/---/g, "").trim();
+		if (templateWithoutDashes === "") {
+			return {};
+		}
 
-		const filePath = file.path;
-		const title = path.basename(filePath, ".md");
-		const hasFrontMatter = this.hasFrontMatter(content);
+		const frontMatter: FrontMatterObject = {};
+		const lines = templateWithoutDashes.split("\n");
 
-		if (!hasFrontMatter) {
-			let newFrontMatter = this.settings.frontMatterTemplate;
-			Object.entries(this.frontMatterProcessors).forEach(([key, processor]) => {
-				if (newFrontMatter.includes(key)) {
-					newFrontMatter = newFrontMatter.replace(key, processor(title));
+		for (const line of lines) {
+			const [key, value] = line.split(":").map((part) => part.trim());
+			if (key && value) {
+				switch (value) {
+					case "{{title}}":
+						frontMatter[key] = this.frontMatterProcessor[value](file.name);
+						break;
+					case "{{date}}":
+						frontMatter[key] = this.frontMatterProcessor[value]();
+						break;
+					case "{{datetime}}":
+						frontMatter[key] = this.frontMatterProcessor[value]();
+						break;
+					default:
+						frontMatter[key] = value;
+						break;
 				}
-			});
-
-			// YAML 파싱 후 tags 설정
-			const fmObj = yaml.parse(newFrontMatter) || {};
-			fmObj.tags = tags;
-			newFrontMatter = "---\n" + yaml.stringify(fmObj).trim() + "\n---\n";
-
-			return newFrontMatter + content;
+			}
 		}
 
-		return content;
+		return frontMatter;
 	}
 
-	public removeEmptyLinesFromFrontMatter(content: string): string {
-		const frontMatter = this.getFrontMatter(content);
-		if (!frontMatter) return content;
-
-		// frontMatter 파싱
-		const fmContent = frontMatter.replace(/^---\r?\n/, "").replace(/\r?\n---\n?$/, "");
-		const fmObj = yaml.parse(fmContent) || {};
-
-		// 다시 문자열화할 때 yaml 라이브러리가 필요없는 빈 줄 정리를 자동으로 처리
-		const cleanedFrontMatter = "---\n" + yaml.stringify(fmObj).trim() + "\n---";
-		const updatedContent = content.replace(this.frontMatterRegex, cleanedFrontMatter);
-
-		return this.addEmptyLineBetweenFrontMatterAndContent(updatedContent);
-	}
-
-	public hasFrontMatter(content: string): boolean {
-		return this.frontMatterRegex.test(content);
-	}
-
-	public removeFrontMatter(content: string): string {
-		return content.replace(this.frontMatterRegex, "");
-	}
-
-	public getFrontMatter(content: string): string | null {
-		const match = content.match(this.frontMatterRegex);
-		return match ? match[0] : null;
-	}
-
-	private isValidFrontMatter(frontMatter: string): boolean {
-		return this.frontMatterRegex.test(frontMatter);
-	}
-
-	public getFrontMatterAttribute(frontMatter: string, attributeKey: string): string | null {
-		if (!this.isValidFrontMatter(frontMatter)) {
-			throw new Error("Invalid front matter");
+	public async updateFrontMatterFromTemplate(
+		template: string,
+		originalFrontMatter: FrontMatterObject,
+		file: TFile
+	): Promise<FrontMatterObject> {
+		const templateWithoutDashes = template.replace(/---/g, "").trim();
+		if (templateWithoutDashes === "") {
+			return originalFrontMatter;
 		}
 
-		const fmContent = frontMatter.replace(/^---\r?\n/, "").replace(/\r?\n---\n?$/, "");
-		const fmObj = yaml.parse(fmContent) || {};
-		const value = fmObj[attributeKey];
-		if (value === undefined || value === null) return null;
-		return Array.isArray(value) ? value.join(", ") : value.toString();
-	}
+		const newFrontMatter: FrontMatterObject = {};
+		const lines = templateWithoutDashes.split("\n");
 
-	public replaceFrontMatter(content: string, frontMatter: string): string {
-		const existingFrontMatter = this.getFrontMatter(content);
-		if (!existingFrontMatter) {
-			return frontMatter + "\n\n" + content;
-		}
-		return content.replace(existingFrontMatter, frontMatter);
-	}
-
-	public setFrontMatterAttribute(frontMatter: string, attributeKey: string, attributeValue: string | string[]): string {
-		if (!this.isValidFrontMatter(frontMatter)) {
-			throw new Error("Invalid front matter");
-		}
-
-		const fmContent = frontMatter.replace(/^---\r?\n/, "").replace(/\r?\n---\n?$/, "");
-		const fmObj = yaml.parse(fmContent) || {};
-
-		// attributeValue가 배열일 경우 배열로 설정, 문자열은 문자열 그대로
-		if (Array.isArray(attributeValue)) {
-			fmObj[attributeKey] = attributeValue;
-		} else {
-			// 쉼표로 구분된 문자열이면 배열로 처리할 수도 있으나, 여기서는 명시적으로 문자열로 처리
-			// 필요한 경우 parse해 배열화하는 로직 추가 가능
-			fmObj[attributeKey] = attributeValue;
+		for (const line of lines) {
+			const [key, value] = line.split(":").map((part) => part.trim());
+			if (key && value) {
+				switch (value) {
+					case "{{title}}":
+						newFrontMatter[key] = this.frontMatterProcessor[value](file.name);
+						break;
+					case "{{date}}":
+						newFrontMatter[key] = this.frontMatterProcessor[value]();
+						break;
+					case "{{datetime}}":
+						newFrontMatter[key] = this.frontMatterProcessor[value]();
+						break;
+					default:
+						newFrontMatter[key] = value;
+						break;
+				}
+			}
 		}
 
-		const updated = "---\n" + yaml.stringify(fmObj).trim() + "\n---\n";
-		return updated;
+		return { ...newFrontMatter, ...originalFrontMatter };
 	}
 }
 
 class LinkProcessor {
 	constructor(private app: App, private settings: JekyllExportSettings) {}
 
-	public async processLinks(content: string): Promise<string> {
+	public async obsidianLinkToMarkdown(content: string): Promise<string> {
 		// Link 형태별 파싱 및 변환
 		const lines = content.split("\n");
 		const processedLines: string[] = [];
@@ -485,7 +398,8 @@ class LinkProcessor {
 		if (this.isObsidianImage(line)) {
 			return await this.convertObsidianImage(line);
 		}
-		return line; // 별도 처리 필요 없는 라인
+
+		return line;
 	}
 
 	private isMarkdownLink(line: string): boolean {
@@ -493,12 +407,17 @@ class LinkProcessor {
 	}
 
 	private isObsidianLink(line: string): boolean {
-		// [[Link]] 혹은 [[Link|Title]] 형태이며 http가 포함되지 않은 경우
 		return /\[\[(.*?)\]\]/.test(line) && !line.includes("http") && !line.startsWith("![[");
 	}
 
 	private isObsidianImage(line: string): boolean {
 		return /^!\[\[.*?\]\]$/.test(line);
+	}
+
+	private convertNormalLinkToMarkdown(line: string): string {
+		return line.replace(/https?:\/\/[^\s]+/g, (match) => {
+			return `[${match}](${match})`;
+		});
 	}
 
 	private convertObsidianLinkToMarkdown(line: string): string {
@@ -565,11 +484,11 @@ Content:
 
 	constructor(private settings: JekyllExportSettings) {}
 
-	public async extractTags(content: string): Promise<string[]> {
-		if (!this.settings.useAutoTags) return [];
+	public async extractTags(content: string): Promise<string[] | null> {
+		if (!this.settings.useAutoTags) return null;
 		if (!this.settings.openaiApiKey) {
 			console.log("OpenAI API key not configured");
-			return [];
+			return null;
 		}
 
 		try {
@@ -597,6 +516,7 @@ Content:
 			});
 
 			if (!response.ok) {
+				new Notice(`API request failed: ${response.statusText}`);
 				throw new Error(`API request failed: ${response.statusText}`);
 			}
 
@@ -611,229 +531,253 @@ Content:
 
 			return tags;
 		} catch (error) {
+			new Notice("Error extracting tags");
 			console.error("Error extracting tags:", error);
 			return [];
 		}
 	}
 }
 
-class AddPermaLinkAndNanoIDFileWriter {
-	constructor(private app: App, private frontMatterProcessor: FrontMatterProcessor) {}
+class FileWriter {
+	constructor(private app: App, private settings: JekyllExportSettings) {}
 
-	public async writeContentToTargetPathAndSync(targetPath: string, content: string, file: TFile): Promise<string> {
-		async function fileExists(path: string): Promise<boolean> {
-			try {
-				await fs.access(path);
-				return true;
-			} catch {
-				return false;
-			}
-		}
-
-		let processedContent = content;
-		if (await fileExists(targetPath)) {
-			const existingContent = await fs.readFile(targetPath, "utf8");
-			const existingFrontMatter = this.frontMatterProcessor.getFrontMatter(existingContent);
-			if (existingFrontMatter) {
-				const existingNanoId = this.frontMatterProcessor.getFrontMatterAttribute(existingFrontMatter, "nanoId");
-				if (existingNanoId) {
-					processedContent = this.frontMatterProcessor.setFrontMatterAttribute(
-						this.frontMatterProcessor.replaceFrontMatter(content, existingFrontMatter),
-						"nanoId",
-						existingNanoId
-					);
-				} else {
-					processedContent = await this.addNanoID(content);
-				}
-			} else {
-				processedContent = await this.addNanoID(content);
-			}
-		}
-
-		processedContent = await this.addPermaLink(processedContent);
-		processedContent = this.frontMatterProcessor.removeEmptyLinesFromFrontMatter(processedContent);
-		await fs.writeFile(targetPath, processedContent, "utf8");
-		const originalContent = await this.app.vault.read(file);
-		// 원본파일에 덮어쓰기
-		await this.app.vault.modify(
-			file,
-			this.frontMatterProcessor.getFrontMatter(processedContent) + this.frontMatterProcessor.removeFrontMatter(originalContent)
-		);
-		return targetPath;
-	}
-
-	private async addPermaLink(content: string): Promise<string> {
-		const frontMatter = this.frontMatterProcessor.getFrontMatter(content);
-		if (frontMatter) {
-			let newFrontMatter = frontMatter;
-			let modified = false;
-
-			// nanoId가 없는 경우 생성 및 추가
-			let nanoId = this.frontMatterProcessor.getFrontMatterAttribute(frontMatter, "nanoId");
-			if (!nanoId) {
-				nanoId = alphaNumNanoId();
-				newFrontMatter = this.frontMatterProcessor.setFrontMatterAttribute(newFrontMatter, "nanoId", nanoId);
-				modified = true;
-			}
-
-			// permalink가 없는 경우 nanoId를 사용하여 생성 및 추가
-			const permalink = this.frontMatterProcessor.getFrontMatterAttribute(newFrontMatter, "permalink");
-			if (!permalink && nanoId) {
-				newFrontMatter = this.frontMatterProcessor.setFrontMatterAttribute(newFrontMatter, "permalink", `/${nanoId}/`);
-				modified = true;
-			}
-
-			// 수정된 프론트 매터가 있을 경우 교체
-			if (modified) {
-				return this.frontMatterProcessor.replaceFrontMatter(content, newFrontMatter);
-			}
-		}
-
-		return content;
-	}
-
-	private async addNanoID(content: string): Promise<string> {
-		const frontMatter = this.frontMatterProcessor.getFrontMatter(content);
-		if (frontMatter) {
-			if (this.frontMatterProcessor.getFrontMatterAttribute(frontMatter, "nanoId")) {
-				return content;
-			} else {
-				const newFrontMatter = this.frontMatterProcessor.setFrontMatterAttribute(frontMatter, "nanoId", alphaNumNanoId());
-				return this.frontMatterProcessor.replaceFrontMatter(content, newFrontMatter);
-			}
-		}
-
-		return content;
-	}
-}
-
-class OverwriteHandler {
-	constructor(
-		private app: App,
-		private frontMatterProcessor: FrontMatterProcessor,
-		private linkProcessor: LinkProcessor,
-		private addPermaLinkAndNanoIDFileWriter: AddPermaLinkAndNanoIDFileWriter
-	) {}
-
-	public async handleExistingFile(existingFilePath: string, file: TFile): Promise<string | null> {
-		const modal = new OverwriteModal(this.app);
-		modal.open();
-		const choice = await modal.getResult();
-
-		switch (choice) {
-			case OverwriteChoice.OverwriteDateAndContent:
-				let processedContent = await this.frontMatterProcessor.addTemplateFrontMatter(file);
-				processedContent = await this.linkProcessor.processLinks(processedContent);
-
-				return await this.addPermaLinkAndNanoIDFileWriter.writeContentToTargetPathAndSync(existingFilePath, processedContent, file);
-			case OverwriteChoice.OverwriteContentOnly:
-				const content = await this.app.vault.read(file);
-				return await this.overwriteContentOnly(existingFilePath, content, file);
-			case OverwriteChoice.Cancel:
-				return null;
-			default:
-				throw new Error("Overwrite choice is invalid");
-		}
-	}
-
-	private async overwriteContentOnly(existingFilePath: string, newContent: string, file: TFile): Promise<string> {
+	public async writeFile(filePath: string, content: string): Promise<void> {
 		try {
-			const existingContent = await fs.readFile(existingFilePath, "utf8");
-			const existingFM = this.frontMatterProcessor.getFrontMatter(existingContent);
-			const newFM = this.frontMatterProcessor.getFrontMatter(newContent);
-
-			if (existingFM && newFM) {
-				const newBodyContent = this.frontMatterProcessor.removeFrontMatter(newContent);
-				const updatedContent = `${existingFM}\n${newBodyContent}`;
-				await this.addPermaLinkAndNanoIDFileWriter.writeContentToTargetPathAndSync(existingFilePath, updatedContent, file);
-			} else {
-				await this.addPermaLinkAndNanoIDFileWriter.writeContentToTargetPathAndSync(existingFilePath, newContent, file);
-			}
-			return existingFilePath;
+			await fs.writeFile(filePath, content, { encoding: "utf-8" });
 		} catch (error) {
-			console.error("Error overwriting content:", error);
-			new Notice("An error occurred while overwriting content.");
-			return existingFilePath;
+			new Notice(`파일 작성 중 오류 발생: ${(error as Error).message}`);
+			throw new Error(`파일 작성 실패: ${(error as Error).message}`);
+		}
+	}
+
+	public async isFileExists(targetDir: string, pattern: string): Promise<{ path: string } | null> {
+		try {
+			const files = await fs.readdir(targetDir);
+			const filteredFiles = files.filter((file) => file.includes(pattern));
+			if (filteredFiles.length > 1) {
+				throw new Error("같은 패턴을 가진 여러 파일이 존재합니다.");
+			}
+
+			return filteredFiles.length === 1 ? { path: path.join(targetDir, filteredFiles[0]) } : null;
+		} catch (error) {
+			new Notice(`파일 존재 여부 확인 중 오류 발생: ${(error as Error).message}`);
+			throw new Error(`파일 존재 확인 실패: ${(error as Error).message}`);
+		}
+	}
+
+	public async mkDir(targetDir: string): Promise<void> {
+		try {
+			if (
+				!(await fs
+					.access(targetDir)
+					.then(() => true)
+					.catch(() => false))
+			) {
+				await fs.mkdir(targetDir, { recursive: true });
+			}
+		} catch (error) {
+			new Notice(`디렉토리 생성 중 오류 발생: ${(error as Error).message}`);
+			throw new Error(`디렉토리 생성 실패: ${(error as Error).message}`);
 		}
 	}
 }
 
-// ========================= JekyllExporter =========================
+enum OverwriteChoice {
+	OverwriteFrontMatterAndContent,
+	OverwriteContentOnly,
+	Cancel,
+}
 
-class JekyllExporter {
+class OverwriteModal extends Modal {
+	private result: Promise<OverwriteChoice>;
+	private resolvePromise!: (value: OverwriteChoice) => void;
+
+	constructor(app: App) {
+		super(app);
+		this.result = new Promise((resolve) => {
+			this.resolvePromise = resolve;
+		});
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.addClass("overwrite-modal-content");
+
+		const title = contentEl.createEl("h2", { text: MODAL_TITLE });
+		title.addClass("overwrite-modal-title");
+
+		const description = contentEl.createEl("p", {
+			text: MODAL_DESCRIPTION,
+		});
+		description.addClass("overwrite-modal-description");
+
+		const buttonContainer = contentEl.createDiv();
+		buttonContainer.addClass("overwrite-modal-button-container");
+
+		this.createStyledButton(buttonContainer, BUTTON_TEXT_OVERWRITE_FRONTMATTER_AND_CONTENT, true, () => {
+			this.resolvePromise(OverwriteChoice.OverwriteFrontMatterAndContent);
+			this.close();
+		});
+
+		this.createStyledButton(buttonContainer, BUTTON_TEXT_OVERWRITE_CONTENT_ONLY, false, () => {
+			this.resolvePromise(OverwriteChoice.OverwriteContentOnly);
+			this.close();
+		});
+
+		this.createStyledButton(buttonContainer, BUTTON_TEXT_CANCEL, false, () => {
+			this.resolvePromise(OverwriteChoice.Cancel);
+			this.close();
+		});
+	}
+
+	private createStyledButton(container: HTMLElement, text: string, isPrimary: boolean, callback: () => void): ButtonComponent {
+		const btn = new ButtonComponent(container).setButtonText(text).onClick(callback);
+		btn.buttonEl.classList.add(isPrimary ? "button-primary" : "button-secondary");
+		return btn;
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+
+	async getResult(): Promise<OverwriteChoice> {
+		const result = await this.result;
+		if (result === OverwriteChoice.Cancel) {
+			new Notice("내보내기가 취소되었습니다.");
+		}
+		return result;
+	}
+}
+
+class ObsidianContent {
+	private frontMatter: FrontMatterObject;
+	private contentBody: string;
+
+	private overwriteModal: OverwriteModal;
+
 	constructor(
 		private app: App,
 		private settings: JekyllExportSettings,
+		private file: TFile,
 		private frontMatterProcessor: FrontMatterProcessor,
 		private linkProcessor: LinkProcessor,
-		private overwriteHandler: OverwriteHandler,
-		private addPermaLinkAndNanoIDFileWriter: AddPermaLinkAndNanoIDFileWriter
-	) {}
-
-	public async exportFile(file: TFile): Promise<string | null> {
-		const targetDir = this.settings.activeTargetFolder;
-		if (!targetDir) {
-			new Notice("No active target folder set.");
-			return null;
-		}
-
-		try {
-			await fs.access(targetDir);
-		} catch {
-			new Notice("Active target folder does not exist.");
-			return null;
-		}
-
-		return await this.processFile(file, targetDir);
+		private openAITagExtractor: OpenAITagExtractor,
+		private fileWriter: FileWriter
+	) {
+		this.overwriteModal = new OverwriteModal(this.app);
 	}
 
-	private async processFile(file: TFile, targetDir: string): Promise<string | null> {
+	public async loadContent(): Promise<void> {
 		try {
-			const fileName = this.createJekyllFileName(file);
-			const relativeDir = path.dirname(file.path);
-			const targetPath = path.join(targetDir, relativeDir, "_posts", fileName);
-			await fs.mkdir(path.dirname(targetPath), { recursive: true });
+			const content = await this.app.vault.read(this.file);
+			const { frontMatter, contentBody } = await this.frontMatterProcessor.parse(content);
+			this.frontMatter = frontMatter;
+			this.contentBody = contentBody;
+		} catch (error) {
+			new Notice(`콘텐츠 로드 중 오류 발생: ${(error as Error).message}`);
+			throw new Error(`콘텐츠 로드 실패: ${(error as Error).message}`);
+		}
+	}
 
-			const existingFilePath = await this.findExistingFile(path.dirname(targetPath), file);
-			if (existingFilePath) {
-				return await this.overwriteHandler.handleExistingFile(existingFilePath, file);
-			} else {
-				let content = await this.app.vault.read(file);
-				content = await this.frontMatterProcessor.addTemplateFrontMatter(file);
-				content = await this.linkProcessor.processLinks(content);
-				await this.addPermaLinkAndNanoIDFileWriter.writeContentToTargetPathAndSync(targetPath, content, file);
-				return targetPath;
+	public async publish(targetDir: string): Promise<void> {
+		try {
+			const sentinizedFileName = this.getSentinizedFileName();
+			await this.fileWriter.mkDir(targetDir);
+			const isFileExists = await this.fileWriter.isFileExists(targetDir, sentinizedFileName);
+			let updatedContentBody;
+
+			if (isFileExists) {
+				this.overwriteModal.open();
+				const choice = await this.overwriteModal.getResult();
+
+				if (choice === OverwriteChoice.Cancel) return;
+
+				if (choice === OverwriteChoice.OverwriteFrontMatterAndContent) {
+					try {
+						const existFileContent = await fs.readFile(isFileExists.path, "utf-8");
+						const { frontMatter: existFrontMatter } = await this.frontMatterProcessor.parse(existFileContent);
+						const existNanoId = existFrontMatter.nanoId;
+						if (existNanoId) this.frontMatter.nanoId = existNanoId;
+					} catch (error) {
+						new Notice(`기존 파일 덮어쓰기 중 오류 발생: ${(error as Error).message}`);
+						throw new Error(`파일 덮어쓰기 실패: ${(error as Error).message}`);
+					}
+				}
+			}
+
+			try {
+				this.frontMatter = await this.frontMatterProcessor.updateFrontMatterFromTemplate(
+					this.settings.frontMatterTemplate,
+					this.frontMatter,
+					this.file
+				);
+
+				if (!this.frontMatter["nanoId"]) {
+					this.frontMatter["nanoId"] = alphaNumNanoId();
+				}
+
+				this.frontMatter["permalink"] = `/${this.frontMatter["nanoId"]}/`;
+
+				const autoGeneratedTags = await this.openAITagExtractor.extractTags(this.contentBody);
+				if (autoGeneratedTags) this.frontMatter["tags"] = autoGeneratedTags;
+
+				updatedContentBody = await this.linkProcessor.obsidianLinkToMarkdown(this.contentBody);
+				const targetFilePath = path.join(targetDir, this.addDateToTitle(sentinizedFileName));
+
+				await this.fileWriter.writeFile(targetFilePath, this.stringify(this.frontMatter, updatedContentBody));
+				await this.app.vault.modify(this.file, this.stringify(this.frontMatter, this.contentBody));
+
+				if (isFileExists && isFileExists.path !== targetFilePath) {
+					await fs.unlink(isFileExists.path);
+				}
+
+				if (!isFileExists) {
+					new Notice("파일이 정상적으로 Jekyll로 내보내졌습니다.");
+				}
+			} catch (error) {
+				new Notice(`파일 내보내기 중 오류 발생: ${(error as Error).message}`);
+				throw new Error(`파일 내보내기 실패: ${(error as Error).message}`);
 			}
 		} catch (error) {
-			console.error("Error processing file:", error);
-			new Notice("An error occurred while processing the file.");
-			return null;
+			new Notice(`내보내기 과정에서 오류가 발생했습니다: ${(error as Error).message}`);
+			throw error;
 		}
 	}
 
-	private createJekyllFileName(file: TFile): string {
+	// --------- private methods ---------
+	private stringify(frontMatter: FrontMatterObject, contentBody: string): string {
+		return `---\n${yaml.stringify(frontMatter)}---\n${contentBody}`;
+	}
+
+	private getSentinizedFileName(): string {
+		return sentinize(this.file.name);
+	}
+
+	private addDateToTitle(title: string): string {
 		const date = new Date().toISOString().split("T")[0];
-		const title = file.basename.replace(/\s+/g, "-");
-		return `${date}-${title}.md`;
-	}
-
-	private async findExistingFile(targetPostsDir: string, file: TFile): Promise<string | null> {
-		try {
-			const files = await fs.readdir(targetPostsDir);
-			const currentTitle = file.basename.replace(/\s+/g, "-");
-			const existingFile = files.find((f) => {
-				const match = f.match(/^\d{4}-\d{2}-\d{2}-(.*)\.md$/);
-				return match && match[1] === currentTitle;
-			});
-			return existingFile ? path.join(targetPostsDir, existingFile) : null;
-		} catch (error) {
-			console.error("Error searching for existing file:", error);
-			return null;
-		}
+		return `${date}-${title}`;
 	}
 }
 
-// ========================= Settings Tab =========================
+class JekyllExporter {
+	private obsidianContent: ObsidianContent;
+
+	constructor(private app: App, private settings: JekyllExportSettings) {}
+
+	public async loadContent(obsidianContent: ObsidianContent) {
+		this.obsidianContent = obsidianContent;
+		await this.obsidianContent.loadContent();
+	}
+
+	public async exportFile(targetPath: string) {
+		try {
+			await this.obsidianContent.publish(targetPath);
+		} catch (error) {
+			new Notice(`파일 내보내기 실패: ${(error as Error).message}`);
+			throw new Error(`exportFile 실패: ${(error as Error).message}`);
+		}
+	}
+}
 
 class JekyllExportSettingTab extends PluginSettingTab {
 	plugin: JekyllExportPlugin;
@@ -946,6 +890,7 @@ class JekyllExportSettingTab extends PluginSettingTab {
 					.onChange(async (value: string) => {
 						this.plugin.settings.frontMatterTemplate = value;
 						await this.plugin.saveSettings();
+						new Notice("Front Matter 템플릿이 업데이트되었습니다.");
 					});
 			});
 
@@ -1080,79 +1025,101 @@ class JekyllExportSettingTab extends PluginSettingTab {
 	}
 }
 
-// ========================= Plugin Class =========================
-
 export default class JekyllExportPlugin extends Plugin {
 	settings: JekyllExportSettings;
 	private exporter!: JekyllExporter;
 
 	async onload() {
-		injectStyles(MODAL_CSS);
-		injectStyles(SETTINGS_CSS);
+		try {
+			injectStyles(MODAL_CSS);
+			injectStyles(SETTINGS_CSS);
 
-		await this.loadSettings();
+			await this.loadSettings();
 
-		const tagExtractor = new OpenAITagExtractor(this.settings);
-		const frontMatterProcessor = new FrontMatterProcessor(this.app, this.settings, tagExtractor);
-		const addPermaLinkAndNanoIDFileWriter = new AddPermaLinkAndNanoIDFileWriter(this.app, frontMatterProcessor);
-		const linkProcessor = new LinkProcessor(this.app, this.settings);
-		const overwriteHandler = new OverwriteHandler(this.app, frontMatterProcessor, linkProcessor, addPermaLinkAndNanoIDFileWriter);
+			this.exporter = new JekyllExporter(this.app, this.settings);
 
-		this.exporter = new JekyllExporter(
-			this.app,
-			this.settings,
-			frontMatterProcessor,
-			linkProcessor,
-			overwriteHandler,
-			addPermaLinkAndNanoIDFileWriter
-		);
-
-		this.addRibbonIcon(ICON_UPLOAD, "Export to Jekyll", () => {
-			const activeFile = this.app.workspace.getActiveFile();
-			if (activeFile && activeFile.extension === "md") {
-				this.exportToJekyll(activeFile);
-			} else {
-				new Notice("No markdown file is open.");
-			}
-		});
-
-		this.registerEvent(
-			this.app.workspace.on("file-menu", (menu, file) => {
-				if (file instanceof TFile && file.extension === "md") {
-					menu.addItem((item) => {
-						item
-							.setTitle(BUTTON_EXPORT)
-							.setIcon(ICON_UPLOAD)
-							.onClick(() => this.exportToJekyll(file as TFile));
-					});
+			this.addRibbonIcon(ICON_UPLOAD, "Export to Jekyll", () => {
+				try {
+					const activeFile = this.app.workspace.getActiveFile();
+					if (activeFile && activeFile.extension === "md") {
+						this.exportToJekyll(activeFile);
+					} else {
+						new Notice("열려 있는 마크다운 파일이 없습니다.");
+					}
+				} catch (error) {
+					new Notice(`리본 아이콘 클릭 중 오류 발생: ${(error as Error).message}`);
+					console.error(error);
 				}
-			})
-		);
+			});
 
-		this.addSettingTab(new JekyllExportSettingTab(this.app, this));
+			this.registerEvent(
+				this.app.workspace.on("file-menu", (menu, file) => {
+					if (file instanceof TFile && file.extension === "md") {
+						menu.addItem((item) => {
+							item
+								.setTitle(BUTTON_EXPORT)
+								.setIcon(ICON_UPLOAD)
+								.onClick(() => {
+									try {
+										this.exportToJekyll(file as TFile);
+									} catch (error) {
+										new Notice(`파일 메뉴에서 내보내기 중 오류 발생: ${(error as Error).message}`);
+										console.error(error);
+									}
+								});
+						});
+					}
+				})
+			);
+
+			this.addSettingTab(new JekyllExportSettingTab(this.app, this));
+		} catch (error) {
+			new Notice(`플러그인 로드 중 오류 발생: ${(error as Error).message}`);
+			console.error(error);
+		}
 	}
 
 	async loadSettings() {
-		const data = await this.loadData();
-		this.settings = { ...DEFAULT_SETTINGS, ...data };
+		try {
+			const data = await this.loadData();
+			this.settings = { ...DEFAULT_SETTINGS, ...data };
+		} catch (error) {
+			new Notice(`설정 불러오기 중 오류 발생: ${(error as Error).message}`);
+			throw new Error(`설정 불러오기 실패: ${(error as Error).message}`);
+		}
 	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
+		try {
+			await this.saveData(this.settings);
+		} catch (error) {
+			new Notice(`설정 저장 중 오류 발생: ${(error as Error).message}`);
+			throw new Error(`설정 저장 실패: ${(error as Error).message}`);
+		}
 	}
 
 	private async exportToJekyll(file: TFile) {
 		try {
-			const targetPath = await this.exporter.exportFile(file);
-			if (!targetPath) {
-				new Notice("Export was cancelled or an error occurred.");
-				return;
-			}
-			await this.saveSettings();
-			new Notice("Jekyll export completed. Path: " + targetPath);
+			new Notice("Jekyll로 내보내기를 시작합니다.");
+			await this.exporter.loadContent(
+				new ObsidianContent(
+					this.app,
+					this.settings,
+					file,
+					new FrontMatterProcessor(this.app, this.settings),
+					new LinkProcessor(this.app, this.settings),
+					new OpenAITagExtractor(this.settings),
+					new FileWriter(this.app, this.settings)
+				)
+			);
+
+			const fileDir = path.dirname(file.path);
+			await this.exporter.exportFile(path.join(this.settings.activeTargetFolder, fileDir, "_posts"));
+
+			new Notice("Jekyll 내보내기가 완료되었습니다.");
 		} catch (error) {
-			console.error("Error during Jekyll export:", error);
-			new Notice("An error occurred during Jekyll export.");
+			new Notice(`Jekyll로 내보내기 중 오류 발생: ${(error as Error).message}`);
+			console.error(error);
 		}
 	}
 }
