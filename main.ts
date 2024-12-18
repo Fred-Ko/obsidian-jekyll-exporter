@@ -1,6 +1,6 @@
 import * as fs from "fs/promises";
 import { customAlphabet } from "nanoid";
-import { App, ButtonComponent, Modal, Notice, Plugin, PluginSettingTab, Setting, TextComponent, TFile } from "obsidian";
+import { App, ButtonComponent, FileSystemAdapter, Modal, Notice, Plugin, PluginSettingTab, Setting, TextComponent, TFile } from "obsidian";
 import * as path from "path";
 import * as yaml from "yaml";
 
@@ -376,118 +376,225 @@ class LinkProcessor {
 	constructor(private app: App, private settings: JekyllExportSettings) {}
 
 	public async obsidianLinkToMarkdown(content: string): Promise<string> {
-		// 주어진 content를 줄 단위로 나눈 뒤, 각 줄을 변환한 뒤 다시 합칩니다.
+		/*
+			obsidianLinkToMarkdown 함수는 Obsidian 형식의 링크와 이미지를 포함한 텍스트 콘텐츠를 받아,
+			이를 Markdown 형식으로 변환하여 반환합니다.
+
+			- 콘텐츠는 여러 줄로 구성될 수 있으며, 각 줄은 개별적으로 처리됩니다.
+			- Obsidian 이미지 구문(![[이미지이름|크기]] 또는 ![[이미지이름]])을 탐지하여 적절한 Markdown 이미지 구문으로 변환합니다.
+				- 외부 이미지(HTTP로 시작하는 경우)는 직접 Markdown 이미지로 변환됩니다.
+					- **불변식:**
+						- 외부 이미지 URL은 유효한 HTTP/HTTPS 프로토콜을 사용해야 합니다.
+						- 변환된 Markdown 이미지 구문은 `![](URL)` 또는 `![](URL){:width="크기px"}` 형태를 유지해야 합니다.
+				- 내부 이미지인 경우, 이미지 파일을 지정된 폴더로 복사하고 해당 경로를 사용하여 Markdown 이미지로 변환됩니다.
+					- **불변식:**
+						- 내부 이미지 파일명은 소문자로 변환되고, 공백은 하이픈(`-`)으로 대체됩니다.
+						- 지정된 대상 폴더(`this.settings.activeTargetFolder + this.settings.imageFolder`)에 이미지 파일이 정확히 복사되어야 합니다.
+						- 복사된 이미지 파일의 경로는 `images/파일명` 형태로 설정됩니다.
+						- 원본 이미지 파일이 존재하지 않으면, 변환이 수행되지 않고 원본 줄이 그대로 유지됩니다.
+						- 이미지 크기가 지정된 경우, 변환된 Markdown 이미지 구문에 `{ :width="크기px" }` 속성이 포함되어야 합니다.
+						- 이미지 복사 과정에서 에러가 발생하면, 에러가 로그에 기록되고 원본 줄이 그대로 유지됩니다.
+				- 이미지 크기가 지정된 경우, Markdown 이미지 구문에 크기 속성이 반영됩니다.
+				- 이미지 크기가 지정되지 않은 경우, 크기 속성 없이 Markdown 이미지로 변환됩니다.
+			- Obsidian 링크 구문([[링크|표시이름]] 또는 [[링크]])을 탐지하여 Markdown 링크 구문([표시이름](url))으로 변환합니다.
+				- **불변식:**
+					- 링크 대상이 URL 형식이 아닌 경우에만 변환이 수행됩니다.
+					- 링크 대상의 공백은 하이픈(`-`)으로 대체되고, 모든 문자는 소문자로 변환됩니다.
+					- 허용되지 않는 문자는 제거되며, 결과 URL은 알파벳 소문자, 숫자, 하이픈만 포함해야 합니다.
+					- 변환된 Markdown 링크 구문은 `[표시이름](url)` 형태를 유지해야 합니다.
+					- 링크 대상이 유효하지 않거나 외부 링크인 경우, 변환을 생략하고 원본 링크를 유지합니다.
+			- 변환 과정에서 발생할 수 있는 오류는 적절히 처리되어, 최종 반환되는 Markdown 콘텐츠가 일관성을 유지하도록 합니다.
+				- **불변식:**
+					- 모든 예외 상황은 로그에 기록되어야 합니다.
+					- 사용자에게 알림(`Notice`)이 적절히 제공되어야 합니다.
+					- 예외 발생 시, 해당 줄은 원본 상태로 유지됩니다.
+			- 모든 변환 작업은 비동기적으로 수행되어, 효율적인 파일 I/O 및 네트워크 요청을 관리합니다.
+				- **불변식:**
+					- 비동기 작업은 `await`를 사용하여 올바르게 처리되어야 합니다.
+					- 비동기 작업 중 발생하는 모든 프로미스는 적절히 처리되어야 합니다.
+			- 최종적으로 모든 줄이 변환된 후, 줄바꿈 문자를 기준으로 다시 합쳐져 최종 Markdown 문자열로 반환됩니다.
+				- **불변식:**
+					- 변환된 모든 줄은 원본 순서를 유지해야 합니다.
+					- 줄바꿈 문자는 `\n`을 사용하여 정확히 복원되어야 합니다.
+					- 최종 문자열은 앞뒤 공백이 제거된 상태여야 합니다(`trim` 사용).
+
+			**보장 사항:**
+				- 입력된 콘텐츠 내 모든 Obsidian 링크와 이미지는 정확하게 Markdown 형식으로 변환됩니다.
+				- 내부 이미지의 경우, 지정된 폴더에 복사된 이미지 파일이 존재하며, 올바른 경로가 참조됩니다.
+				- 외부 이미지와 링크는 원본 URL을 유지하거나 적절히 변환되어 포함됩니다.
+				- 변환 과정에서 발생하는 예외는 로그에 기록되고, 사용자에게 적절히 알림이 제공됩니다.
+				- 최종 반환되는 Markdown 콘텐츠는 형식적으로 올바르며, Markdown 렌더링 시 의도한 대로 표시됩니다.
+
+			**예제:**
+
+			1. **Obsidian 링크 변환**
+
+				- **입력:**
+					```
+					이것은 [[페이지 이름|표시 이름]]과 [[다른 페이지]]에 대한 링크입니다.
+					```
+
+				- **출력:**
+					```
+					이것은 [표시 이름](페이지-이름)과 [다른 페이지](다른-페이지)에 대한 링크입니다.
+					```
+
+			2. **Obsidian 이미지 변환 (외부 이미지)**
+
+				- **입력 (크기 포함):**
+					```
+					여기에 외부 이미지가 있습니다: ![[http://example.com/image.png|300]]
+					```
+
+				- **출력:**
+					```
+					여기에 외부 이미지가 있습니다: ![](http://example.com/image.png){:width="300px"}
+					```
+
+				- **입력 (크기 미포함):**
+					```
+					여기에 외부 이미지가 있습니다: ![[http://example.com/image.png]]
+					```
+
+				- **출력:**
+					```
+					여기에 외부 이미지가 있습니다: ![](http://example.com/image.png)
+					```
+
+			3. **Obsidian 이미지 변환 (내부 이미지)**
+
+				- **입력 (크기 포함):**
+					```
+					내부 이미지를 추가합니다: ![[내부이미지.jpg|200]]
+					```
+
+				- **출력:**
+					```
+					내부 이미지를 추가합니다: ![](images/internalimage.jpg){:width="200px"}
+					```
+					- **설명:** `내부이미지.jpg` 파일이 지정된 폴더로 복사되고, `images/internalimage.jpg` 경로로 참조됩니다.
+
+				- **입력 (크기 미포함):**
+					```
+					내부 이미지를 추가합니다: ![[내부이미지.jpg]]
+					```
+
+				- **출력:**
+					```
+					내부 이미지를 추가합니다: ![](images/internalimage.jpg)
+					```
+					- **설명:** `내부이미지.jpg` 파일이 지정된 폴더로 복사되고, `images/internalimage.jpg` 경로로 참조됩니다.
+
+			4. **복합 예제**
+
+				- **입력:**
+					```
+					이 문서에는 [[링크1]]과 [[링크2|표시2]]가 포함되어 있습니다.
+					이미지는 ![[http://external.com/외부이미지.png|150]]와 ![[내부이미지.png|250]], ![[내부이미지2.png]]을 포함합니다.
+					```
+
+				- **출력:**
+					```
+					이 문서에는 [링크1](링크1)과 [표시2](링크2)가 포함되어 있습니다.
+					이미지는 ![](http://external.com/외부이미지.png){:width="150px"}와 ![](images/internalimage.png){:width="250px"}, ![](images/internalimage2.png}을 포함합니다.
+					```
+					- **설명:** 
+						- `내부이미지.png`와 `내부이미지2.png` 파일이 지정된 폴더로 복사되고, 각각 `images/internalimage.png` 및 `images/internalimage2.png` 경로로 참조됩니다.
+						- `![[내부이미지2.png]]`는 크기 지정이 없으므로, `{ :width="..." }` 속성이 포함되지 않습니다.
+
+			**보충 설명:**
+
+			- **Obsidian 링크 변환:**
+				- `[[링크|표시 이름]]` 형태는 `[표시 이름](링크)`로 변환됩니다.
+				- `[[링크]]` 형태는 `[링크](링크)`로 변환됩니다.
+				- 링크 대상이 URL 형식(`http://` 또는 `https://`)인 경우, 그대로 유지하거나 적절히 변환됩니다.
+
+			- **Obsidian 이미지 변환:**
+				- 외부 이미지는 `![[URL|크기]]` 형태에서 `![](URL){:width="크기px"}`로 변환됩니다.
+				- 외부 이미지 중 크기 지정이 없는 경우, `![](URL)`로 변환됩니다.
+				- 내부 이미지는 `![[파일명|크기]]` 또는 `![[파일명]]` 형태에서 지정된 폴더로 파일을 복사한 후, `![](경로){:width="크기px"}` 또는 `![](경로)`로 변환됩니다.
+				- 내부 이미지 중 크기 지정이 없는 경우, `{ :width="..." }` 속성이 포함되지 않습니다.
+				- 내부 이미지 파일 복사 시 다음 불변식을 준수합니다:
+					- 파일명이 소문자로 변환되고, 공백이 하이픈으로 대체됩니다.
+					- 지정된 대상 폴더에 이미지 파일이 정확히 복사됩니다.
+					- 복사된 이미지 파일의 경로가 Markdown 이미지 구문에 올바르게 반영됩니다.
+					- 이미지 파일이 존재하지 않거나 복사에 실패하면, 원본 줄이 그대로 유지됩니다.
+
+			- **오류 처리:**
+				- 변환 과정 중 파일이 존재하지 않거나 접근 권한이 없는 경우, 원본 콘텐츠을 그대로 유지하고 로그에 오류를 기록합니다.
+				- 네트워크 오류 등 외부 요인으로 인한 변환 실패 시에도 원본 콘텐츠를 유지하여 일관성을 보장합니다.
+
+			**추가 고려 사항:**
+				- 비동기 작업(예: 파일 읽기/쓰기)이 포함되므로, 각 단계에서 적절한 `await` 사용을 고려해야 합니다.
+				- 에러 처리를 통해 변환 과정 중 발생할 수 있는 예외 상황을 안전하게 처리해야 합니다.
+				- 성능 최적화를 위해 필요 시 병렬 처리를 고려할 수 있습니다.
+				- 다양한 이미지 및 링크 형식을 지원하기 위해 정규 표현식을 정교하게 설계해야 합니다.
+		*/
 		const lines = content.split("\n");
-		const convertedLines: string[] = [];
-		for (const line of lines) {
-			const converted = await this.processLine(line);
-			convertedLines.push(converted);
-		}
-		return convertedLines.join("\n").trim();
-	}
+		const processedLines = await Promise.all(
+			lines.map(async (line) => {
+				// Obsidian 이미지 변환
+				line = line.replace(/!\[\[(http[s]?:\/\/[^\|\]]+)(?:\|(\d+))?\]\]/g, (match, url, size) => {
+					return size ? `![](${url}){:width="${size}px"}` : `![](${url})`;
+				});
 
-	// 한 줄에 대해 obsidian link, obsidian image, markdown link 등을 처리
-	private async processLine(line: string): Promise<string> {
-		let processedLine = line;
+				const internalImageMatches = [...line.matchAll(/!\[\[([^\|\]]+)(?:\|(\d+))?\]\]/g)];
+				for (const match of internalImageMatches) {
+					const [fullMatch, fileName, size] = match;
+					const sanitizedFileName = fileName.toLowerCase().replace(/ /g, "-");
+					const targetPath = path.join(this.settings.activeTargetFolder, this.settings.imageFolder, sanitizedFileName);
 
-		// Obsidian image 처리: ![[...]] 형태
-		// 한 줄에 여러 이미지를 포함할 수 있으므로 반복적으로 처리
-		while (this.containsObsidianImage(processedLine)) {
-			processedLine = await this.replaceFirstObsidianImage(processedLine);
-		}
+					try {
+						// Vault 내의 모든 파일을 검색하여 일치하는 파일 찾기
+						const files = this.app.vault.getFiles();
+						const matchingFile = files.find(file => file.name.toLowerCase() === fileName.toLowerCase());
+		
+						if (matchingFile) {
+							// FileSystemAdapter를 사용하여 절대 경로 가져오기
+							const adapter = this.app.vault.adapter;
+							if (adapter instanceof FileSystemAdapter) {
+								const basePath = adapter.getBasePath();
+								const absoluteFilePath = path.join(basePath, matchingFile.path);
+								console.log(`Copying file from: ${absoluteFilePath} to ${targetPath}`);
+								await fs.copyFile(absoluteFilePath, targetPath);
+								const replacement = size ? `![](images/${sanitizedFileName}){:width="${size}px"}` : `![](images/${sanitizedFileName})`;
+								line = line.replace(fullMatch, replacement);
+							} else {
+								console.error("FileSystemAdapter가 아닙니다.");
+							}
+						} else {
+							console.error(`파일을 찾을 수 없습니다: ${fileName}`);
+						}
+					} catch (error) {
+						console.error(`이미지 복사 실패: ${error}`);
+						// 원본 유지
+					}
+				}
 
-		// Obsidian link 처리: [[...]] 형태
-		// 한 줄에 여러 링크를 포함할 수 있으므로 반복적으로 처리
-		while (this.containsObsidianLink(processedLine)) {
-			processedLine = this.replaceFirstObsidianLink(processedLine);
-		}
+				// Obsidian 링크 변환
+				line = line.replace(/\[\[([^\|\]]+)\|([^\]]+)\]\]/g, (match, link, displayName) => {
+					const sanitizedLink = link
+						.toLowerCase()
+						.replace(/ /g, "-")
+						.replace(/[^a-z0-9-]/g, "");
+					return `[${displayName}](${sanitizedLink})`;
+				});
 
-		// Markdown link는 이미 처리할 필요가 없음
-		return processedLine;
-	}
+				line = line.replace(/\[\[([^\]]+)\]\]/g, (match, link) => {
+					const sanitizedLink = link
+						.toLowerCase()
+						.replace(/ /g, "-")
+						.replace(/[^a-z0-9-]/g, "");
+					return `[${link}](${sanitizedLink})`;
+				});
 
-	private containsObsidianLink(line: string): boolean {
-		// ![[...]] 이미지 형태가 아니라 단순 [[...]] 링크 형태인지 확인
-		return /\[\[(?!.*:\/\/)(.*?)\]\]/.test(line) && !/^!\[\[.*\]\]$/.test(line);
-	}
+				return line;
+			})
+		);
 
-	private containsObsidianImage(line: string): boolean {
-		// ![[...]] 형태인지 확인
-		return /!\[\[(.*?)\]\]/.test(line);
-	}
-
-	private replaceFirstObsidianLink(line: string): string {
-		// [[링크|표시이름]] 또는 [[링크]] 형태를 markdown link로 변환
-		return line.replace(/\[\[(?!.*:\/\/)(.*?)\]\]/, (match, p1) => {
-			const parts = p1.split("|");
-			const linkTarget = parts[0].trim();
-			const linkText = (parts[1] || parts[0]).trim();
-
-			// 링크를 url 형태로 변경 (스페이스 -> 하이픈, 소문자)
-			const url = linkTarget
-				.toLowerCase()
-				.replace(/\s+/g, "-")
-				.replace(/[^a-z0-9\-]/g, "");
-
-			// URL이 없는 경우나 http로 시작하면 변환하지 않음
-			if (!url || url.startsWith("http")) {
-				return match;
-			}
-			return `[${linkText}](${url})`;
-		});
-	}
-
-	private async replaceFirstObsidianImage(line: string): Promise<string> {
-		// ![[이미지이름|크기]] 형태에서 이미지 처리
-		const imgMatch = line.match(/!\[\[([^\]|]+)(?:\|(\d+))?\]\]/);
-		if (!imgMatch) return line;
-		const [, imgName, width] = imgMatch;
-
-		const resized = width ? `{:width="${width}px"}` : "";
-		let finalPath = imgName;
-
-		// http로 시작하는 경우 외부이미지
-		if (imgName.startsWith("http")) {
-			return line.replace(imgMatch[0], `![](${imgName})${resized}`);
-		}
-
-		// 이미지 확장자 체크
-		const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".webp"];
-		const hasValidExtension = imageExtensions.some(ext => imgName.toLowerCase().endsWith(ext));
-		if (!hasValidExtension) {
-			// 이미지 확장자 없이 ![[...]]를 사용한 경우 처리 불가하므로 그대로 둔다.
-			return line;
-		}
-
-		// Obsidian 내부 파일 검색
-		const imageFile = this.app.vault.getFiles().find(f => f.path.endsWith(imgName));
-		if (!imageFile) {
-			// 파일을 못 찾으면 변환 불가
-			return line;
-		}
-
-		try {
-			// 이미지 바이너리 읽기
-			const imageData = await this.app.vault.readBinary(imageFile);
-			const sanitizedName = path.basename(imgName)
-				.toLowerCase()
-				.replace(/\s+/g, "-");
-			const targetDir = path.join(this.settings.activeTargetFolder, this.settings.imageFolder);
-			const targetPath = path.join(targetDir, sanitizedName);
-
-			await fs.mkdir(path.dirname(targetPath), { recursive: true });
-			await fs.writeFile(targetPath, Buffer.from(imageData));
-
-			finalPath = path.join(this.settings.imageFolder, sanitizedName);
-			return line.replace(imgMatch[0], `\n![](${finalPath})${resized}\n`);
-		} catch (error) {
-			console.error(`Image processing error: ${error}`);
-			new Notice(`Error processing image: ${imgName}`);
-			return line;
-		}
+		return processedLines.join("\n").trim();
 	}
 }
-
 
 class OpenAITagExtractor {
 	private TAG_EXTRACTION_PROMPT = `
