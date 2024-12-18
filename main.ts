@@ -376,97 +376,118 @@ class LinkProcessor {
 	constructor(private app: App, private settings: JekyllExportSettings) {}
 
 	public async obsidianLinkToMarkdown(content: string): Promise<string> {
-		// Link 형태별 파싱 및 변환
+		// 주어진 content를 줄 단위로 나눈 뒤, 각 줄을 변환한 뒤 다시 합칩니다.
 		const lines = content.split("\n");
-		const processedLines: string[] = [];
-
+		const convertedLines: string[] = [];
 		for (const line of lines) {
-			const newLine = await this.processLine(line);
-			processedLines.push(newLine);
+			const converted = await this.processLine(line);
+			convertedLines.push(converted);
 		}
-
-		return processedLines.join("\n").trim();
+		return convertedLines.join("\n").trim();
 	}
 
+	// 한 줄에 대해 obsidian link, obsidian image, markdown link 등을 처리
 	private async processLine(line: string): Promise<string> {
-		if (this.isMarkdownLink(line)) {
-			return line; // 이미 MD 링크는 그대로
-		}
-		if (this.isObsidianLink(line)) {
-			return this.convertObsidianLinkToMarkdown(line);
-		}
-		if (this.isObsidianImage(line)) {
-			return await this.convertObsidianImage(line);
+		let processedLine = line;
+
+		// Obsidian image 처리: ![[...]] 형태
+		// 한 줄에 여러 이미지를 포함할 수 있으므로 반복적으로 처리
+		while (this.containsObsidianImage(processedLine)) {
+			processedLine = await this.replaceFirstObsidianImage(processedLine);
 		}
 
-		return line;
+		// Obsidian link 처리: [[...]] 형태
+		// 한 줄에 여러 링크를 포함할 수 있으므로 반복적으로 처리
+		while (this.containsObsidianLink(processedLine)) {
+			processedLine = this.replaceFirstObsidianLink(processedLine);
+		}
+
+		// Markdown link는 이미 처리할 필요가 없음
+		return processedLine;
 	}
 
-	private isMarkdownLink(line: string): boolean {
-		return /\[[^\]]*\]\([^)]*\)/.test(line);
+	private containsObsidianLink(line: string): boolean {
+		// ![[...]] 이미지 형태가 아니라 단순 [[...]] 링크 형태인지 확인
+		return /\[\[(?!.*:\/\/)(.*?)\]\]/.test(line) && !/^!\[\[.*\]\]$/.test(line);
 	}
 
-	private isObsidianLink(line: string): boolean {
-		return /\[\[(.*?)\]\]/.test(line) && !line.includes("http") && !line.startsWith("![[");
+	private containsObsidianImage(line: string): boolean {
+		// ![[...]] 형태인지 확인
+		return /!\[\[(.*?)\]\]/.test(line);
 	}
 
-	private isObsidianImage(line: string): boolean {
-		return /^!\[\[.*?\]\]$/.test(line);
-	}
+	private replaceFirstObsidianLink(line: string): string {
+		// [[링크|표시이름]] 또는 [[링크]] 형태를 markdown link로 변환
+		return line.replace(/\[\[(?!.*:\/\/)(.*?)\]\]/, (match, p1) => {
+			const parts = p1.split("|");
+			const linkTarget = parts[0].trim();
+			const linkText = (parts[1] || parts[0]).trim();
 
-	private convertNormalLinkToMarkdown(line: string): string {
-		return line.replace(/https?:\/\/[^\s]+/g, (match) => {
-			return `[${match}](${match})`;
-		});
-	}
+			// 링크를 url 형태로 변경 (스페이스 -> 하이픈, 소문자)
+			const url = linkTarget
+				.toLowerCase()
+				.replace(/\s+/g, "-")
+				.replace(/[^a-z0-9\-]/g, "");
 
-	private convertObsidianLinkToMarkdown(line: string): string {
-		return line.replace(/\[\[(.*?)\]\]/g, (match, link) => {
-			const parts = link.split("|");
-			const title = parts[1] || parts[0];
-			const url = parts[0].toLowerCase().replace(/ /g, "-");
-			if (url.startsWith("http") || !url) {
+			// URL이 없는 경우나 http로 시작하면 변환하지 않음
+			if (!url || url.startsWith("http")) {
 				return match;
 			}
-			return `[${title}](${url})`;
+			return `[${linkText}](${url})`;
 		});
 	}
 
-	private async convertObsidianImage(line: string): Promise<string> {
-		const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".webp"];
-		const match = line.match(/!\[\[([^\]|]+)(?:\|(\d+))?\]\]/);
-		if (!match) return line;
+	private async replaceFirstObsidianImage(line: string): Promise<string> {
+		// ![[이미지이름|크기]] 형태에서 이미지 처리
+		const imgMatch = line.match(/!\[\[([^\]|]+)(?:\|(\d+))?\]\]/);
+		if (!imgMatch) return line;
+		const [, imgName, width] = imgMatch;
 
-		const [, imageName, width] = match;
 		const resized = width ? `{:width="${width}px"}` : "";
+		let finalPath = imgName;
 
-		if (imageName.startsWith("http")) {
-			return `![](${imageName})${resized}`;
+		// http로 시작하는 경우 외부이미지
+		if (imgName.startsWith("http")) {
+			return line.replace(imgMatch[0], `![](${imgName})${resized}`);
 		}
 
-		if (!imageExtensions.some((ext) => imageName.toLowerCase().endsWith(ext))) {
+		// 이미지 확장자 체크
+		const imageExtensions = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".svg", ".webp"];
+		const hasValidExtension = imageExtensions.some(ext => imgName.toLowerCase().endsWith(ext));
+		if (!hasValidExtension) {
+			// 이미지 확장자 없이 ![[...]]를 사용한 경우 처리 불가하므로 그대로 둔다.
 			return line;
 		}
 
-		const imageFile = this.app.vault.getFiles().find((f) => f.path.endsWith(imageName));
-		if (!imageFile) return line;
+		// Obsidian 내부 파일 검색
+		const imageFile = this.app.vault.getFiles().find(f => f.path.endsWith(imgName));
+		if (!imageFile) {
+			// 파일을 못 찾으면 변환 불가
+			return line;
+		}
 
 		try {
+			// 이미지 바이너리 읽기
 			const imageData = await this.app.vault.readBinary(imageFile);
-			const sanitizedImageName = path.basename(imageName).toLowerCase().replace(/\s+/g, "-");
-			const targetImagePath = path.join(this.settings.activeTargetFolder, this.settings.imageFolder, sanitizedImageName);
-			await fs.mkdir(path.dirname(targetImagePath), { recursive: true });
-			await fs.writeFile(targetImagePath, Buffer.from(imageData));
+			const sanitizedName = path.basename(imgName)
+				.toLowerCase()
+				.replace(/\s+/g, "-");
+			const targetDir = path.join(this.settings.activeTargetFolder, this.settings.imageFolder);
+			const targetPath = path.join(targetDir, sanitizedName);
 
-			const newImagePath = path.join(this.settings.imageFolder, sanitizedImageName);
-			return `![](${newImagePath})${resized}`;
+			await fs.mkdir(path.dirname(targetPath), { recursive: true });
+			await fs.writeFile(targetPath, Buffer.from(imageData));
+
+			finalPath = path.join(this.settings.imageFolder, sanitizedName);
+			return line.replace(imgMatch[0], `\n![](${finalPath})${resized}\n`);
 		} catch (error) {
 			console.error(`Image processing error: ${error}`);
-			new Notice(`Error processing image: ${imageName}`);
+			new Notice(`Error processing image: ${imgName}`);
 			return line;
 		}
 	}
 }
+
 
 class OpenAITagExtractor {
 	private TAG_EXTRACTION_PROMPT = `
