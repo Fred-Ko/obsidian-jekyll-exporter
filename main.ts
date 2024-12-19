@@ -911,7 +911,8 @@ class ObsidianContent {
 						break;
 					case PermalinkStyle.FileNameNoUrlEncoding:
 					default:
-						this.frontMatter["permalink"] = `/${sentinizedFileName}/`;
+						const fileNameWithoutExtension = path.basename(sentinizedFileName, path.extname(sentinizedFileName));
+						this.frontMatter["permalink"] = `/${fileNameWithoutExtension}/`;
 						break;
 				}
 
@@ -944,7 +945,7 @@ class ObsidianContent {
 	}
 
 	private getSentinizedFileName(): string {
-		return sentinize(this.file.name);
+		return sentinize(this.file.name).replace(/-/g, "+");
 	}
 
 	private addDateToTitle(title: string): string {
@@ -1217,7 +1218,6 @@ class JekyllExportSettingTab extends PluginSettingTab {
 				});
 			});
 
-		// 파일이름 변경 옵션
 		const renameSection = containerEl.createDiv("jekyll-settings-section");
 		renameSection.createEl("h2", { text: "Permalink Settings" });
 
@@ -1229,10 +1229,10 @@ class JekyllExportSettingTab extends PluginSettingTab {
 				dropdown.addOption(PermalinkStyle.NanoId, PermalinkStyle.NanoId);
 				dropdown.addOption(PermalinkStyle.FileNameUrlEncoded, PermalinkStyle.FileNameUrlEncoded);
 				dropdown.addOption(PermalinkStyle.FileNameNoUrlEncoding, PermalinkStyle.FileNameNoUrlEncoding);
-				dropdown.setValue(this.plugin.settings.permalinkStyle || PermalinkStyle.NanoId);
+				dropdown.setValue(this.plugin.settings.permalinkStyle);
 				dropdown.onChange(async (value) => {
 					this.plugin.settings.permalinkStyle = value as PermalinkStyle;
-					dropdown.setValue(value);
+					new Notice(`Permalink style updated.\n => "${value}"`);
 					await this.plugin.saveSettings();
 				});
 			});
@@ -1333,9 +1333,23 @@ export default class JekyllExportPlugin extends Plugin {
 		try {
 			const data = await this.loadData();
 
+			// device-specific settings
 			data[this.deviceId] = {
 				activeTargetFolder: this.settings.activeTargetFolder || "",
 			};
+
+			// general settings
+			data.targetFolders = this.settings.targetFolders;
+			data.excludePatterns = this.settings.excludePatterns;
+			data.frontMatterTemplate = this.settings.frontMatterTemplate;
+			data.imageFolder = this.settings.imageFolder;
+			data.openaiApiBaseUrl = this.settings.openaiApiBaseUrl;
+			data.openaiModel = this.settings.openaiModel;
+			data.openaiApiKey = this.settings.openaiApiKey;
+			data.useAutoTags = this.settings.useAutoTags;
+			data.permalinkStyle = this.settings.permalinkStyle;
+
+			console.log("Saving settings:", data);
 
 			await this.saveData(data);
 		} catch (error) {
