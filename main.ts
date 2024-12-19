@@ -279,7 +279,10 @@ function injectStyles(css: string) {
 }
 
 function sentinize(fileName: string) {
-	return fileName.replace(/ /g, "-");
+	return fileName
+		.toLowerCase()
+		.replace(/ /g, "-")
+		.replace(/([!@#$%^&*()_+\-=])\1+/g, "$1");
 }
 
 function alphaNumNanoId(): string {
@@ -578,7 +581,7 @@ class LinkProcessor {
 								const absoluteFilePath = path.join(basePath, matchingFile.path);
 								console.log(`Copying file from: ${absoluteFilePath} to ${targetPath}`);
 								await fs.copyFile(absoluteFilePath, targetPath);
-								const replacement = size ? `![](images/${sanitizedFileName}){:width="${size}px"}` : `![](images/${sanitizedFileName})`;
+								const replacement = size ? `\n![](${this.settings.imageFolder}/${sanitizedFileName}){:width="${size}px"}\n` : `\n![](${this.settings.imageFolder}/${sanitizedFileName})\n`;
 								line = line.replace(fullMatch, replacement);
 							} else {
 								console.error("FileSystemAdapter가 아닙니다.");
@@ -1336,6 +1339,7 @@ export default class JekyllExportPlugin extends Plugin {
 			// device-specific settings
 			data[this.deviceId] = {
 				activeTargetFolder: this.settings.activeTargetFolder || "",
+				permalinkStyle: this.settings.permalinkStyle,
 			};
 
 			// general settings
@@ -1375,6 +1379,7 @@ export default class JekyllExportPlugin extends Plugin {
 			);
 
 			const fileDir = path.dirname(file.path);
+			await this.loadSettings();
 			await this.exporter.exportFile(path.join(this.settings.activeTargetFolder, fileDir, "_posts"));
 
 			new Notice("Jekyll 내보내기가 완료되었습니다.");
