@@ -870,6 +870,11 @@ class ObsidianContent {
 					}
 				}
 
+				if (choice === OverwriteChoice.OverwriteContentOnly) {
+					updatedContentBody = await this.linkProcessor.obsidianLinkToMarkdown(this.contentBody);
+					targetFilePath = isFileExists.path;
+				}
+
 				if (choice === OverwriteChoice.OverwriteFrontMatterOnly) {
 					try {
 						const existFileContent = await fs.readFile(isFileExists.path, "utf-8");
