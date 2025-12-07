@@ -1,0 +1,68 @@
+﻿name: Release Obsidian Plugin
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Plugin
+        run: |
+          npm run build
+
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+
+          # manifest.json에서 버전 읽기
+          manifest_version=$(cat manifest.json | jq -r '.version')
+
+          # 태그와 manifest 버전이 일치하는지 확인
+          if [ "$tag" != "$manifest_version" ]; then
+            echo "Error: Tag version ($tag) does not match manifest version ($manifest_version)"
+            exit 1
+          fi
+
+          # 릴리즈 노트 생성
+          echo "## Changes in this version" > release_notes.md
+          echo "$(git log --pretty=format:'- %s' $(git describe --tags --abbrev=0 HEAD^)..HEAD)" >> release_notes.md
+
+          # 릴리즈에 포함할 파일들
+          files=(
+            "main.js"
+            "manifest.json"
+            "styles.css"
+          )
+
+          # 릴리즈 생성
+          gh release create "$tag" \
+            --title "Version $tag" \
+            --notes-file release_notes.md \
+            "${files[@]}"
+
+      - name: Upload Release Assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release upload "$tag" \
+            main.js \
+            manifest.json \
+            styles.css \
+            --clobber
