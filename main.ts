@@ -565,13 +565,30 @@ class LinkProcessor {
 				const internalImageMatches = [...line.matchAll(/!\[\[([^\|\]]+)(?:\|(\d+))?\]\]/g)];
 				for (const match of internalImageMatches) {
 					const [fullMatch, fileName, size] = match;
-					const sanitizedFileName = sentinize(fileName);
+					// 경로가 포함된 경우를 처리: 경로의 각 부분을 sanitize하고 최종 파일명만 사용
+					const fileNameParts = fileName.split("/");
+					const baseFileName = fileNameParts[fileNameParts.length - 1];
+					const sanitizedFileName = sentinize(baseFileName);
 					const targetPath = path.join(this.settings.activeTargetFolder, this.settings.imageFolder, sanitizedFileName);
 
 					try {
 						// Vault 내의 모든 파일을 검색하여 일치하는 파일 찾기
 						const files = this.app.vault.getFiles();
-						const matchingFile = files.find((file) => file.name.toLowerCase() === fileName.toLowerCase());
+						// 먼저 경로를 포함해서 찾기 시도 (경로가 포함된 경우)
+						let matchingFile = files.find((file) => {
+							const filePathLower = file.path.toLowerCase();
+							const fileNameLower = fileName.toLowerCase();
+							// 경로가 정확히 일치하는지 확인
+							return filePathLower === fileNameLower;
+						});
+
+						// 경로로 찾지 못한 경우 파일명만으로 찾기 (하위 호환성)
+						if (!matchingFile) {
+							matchingFile = files.find((file) => {
+								const fileBaseName = path.basename(file.path);
+								return fileBaseName.toLowerCase() === baseFileName.toLowerCase();
+							});
+						}
 
 						if (matchingFile) {
 							// FileSystemAdapter를 사용하여 절대 경로 가져오기
@@ -581,7 +598,9 @@ class LinkProcessor {
 								const absoluteFilePath = path.join(basePath, matchingFile.path);
 								console.log(`Copying file from: ${absoluteFilePath} to ${targetPath}`);
 								await fs.copyFile(absoluteFilePath, targetPath);
-								const replacement = size ? `\n![](${this.settings.imageFolder}/${sanitizedFileName}){:width="${size}px"}\n` : `\n![](${this.settings.imageFolder}/${sanitizedFileName})\n`;
+								const replacement = size
+									? `\n![](${this.settings.imageFolder}/${sanitizedFileName}){:width="${size}px"}\n`
+									: `\n![](${this.settings.imageFolder}/${sanitizedFileName})\n`;
 								line = line.replace(fullMatch, replacement);
 							} else {
 								console.error("FileSystemAdapter가 아닙니다.");
@@ -616,14 +635,21 @@ class LinkProcessor {
 
 class OpenAITagExtractor {
 	private TAG_EXTRACTION_PROMPT = `
-Given the following content, extract up to 10 relevant tags that best describe the main topics, technologies, concepts, or themes discussed.
-Rules:
-1. Return only the tags as a comma-separated list
-2. Use lowercase for all tags
-3. Replace spaces with hyphens in multi-word tags
-4. Maximum 10 tags
-5. No special characters except hyphens
-6. No explanations, just the tags
+You are a technical blog tagging expert. Extract 3-7 highly relevant tags for this technical blog post.
+
+Tagging Guidelines:
+1. **Specificity over breadth**: Prefer specific tags (e.g., "python", "react-hooks") over generic ones (e.g., "programming", "web")
+2. **Technology stack**: Include main technologies, frameworks, or languages used (e.g., "docker", "typescript", "kubernetes")
+3. **Topic/domain**: Include the main topic or domain area (e.g., "backend", "devops", "database-design", "api-development")
+4. **Concepts/patterns**: Include important concepts or patterns discussed (e.g., "design-patterns", "performance-optimization", "testing")
+5. **Consistency**: Use lowercase, hyphenate multi-word tags, avoid abbreviations unless widely recognized (use "javascript" not "js")
+6. **Reusability**: Only use tags that could apply to multiple posts (avoid one-off tags)
+7. **Limit**: Extract 3-7 tags maximum - quality over quantity
+
+Output Format:
+- Return only tags as a comma-separated list
+- No explanations or additional text
+- Example: python,fastapi,api-design,async-programming,performance
 
 Content:
 `;
@@ -671,11 +697,26 @@ Content:
 
 			const tags = tagString
 				.split(",")
-				.map((tag: string) => tag.trim().toLowerCase())
-				.filter((tag: string) => tag)
-				.slice(0, 10);
+				.map((tag: string) => {
+					// 소문자 변환 및 공백 제거
+					let cleaned = tag.trim().toLowerCase();
+					// 공백을 하이픈으로 변환
+					cleaned = cleaned.replace(/\s+/g, "-");
+					// 허용되지 않는 특수문자 제거 (하이픈, 알파벳, 숫자만 허용)
+					cleaned = cleaned.replace(/[^a-z0-9-]/g, "");
+					// 연속된 하이픈 제거
+					cleaned = cleaned.replace(/-+/g, "-");
+					// 앞뒤 하이픈 제거
+					cleaned = cleaned.replace(/^-+|-+$/g, "");
+					return cleaned;
+				})
+				.filter((tag: string) => {
+					// 빈 태그, 너무 짧은 태그(1글자), 너무 긴 태그(30자 이상) 제거
+					return tag && tag.length >= 2 && tag.length <= 30;
+				})
+				.slice(0, 7); // 최대 7개로 제한
 
-			return tags;
+			return tags.length > 0 ? tags : null;
 		} catch (error) {
 			new Notice("Error extracting tags");
 			console.error("Error extracting tags:", error);
