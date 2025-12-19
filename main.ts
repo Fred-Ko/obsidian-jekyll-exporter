@@ -614,6 +614,61 @@ class LinkProcessor {
 					}
 				}
 
+				// 마크다운 형식 이미지 처리 (![alt](path) 또는 ![alt](path){:width="300px"})
+				const markdownImageMatches = [...line.matchAll(/!\[([^\]]*)\]\(([^\)]+)(?:\{:width="(\d+)px"\})?\)/g)];
+				for (const match of markdownImageMatches) {
+					const [fullMatch, altText, imagePath, existingWidth] = match;
+					// HTTP로 시작하는 외부 이미지는 건너뛰기
+					if (imagePath.startsWith("http://") || imagePath.startsWith("https://")) {
+						continue;
+					}
+
+					// 상대 경로인 경우 파일 찾기 및 복사
+					const imagePathParts = imagePath.split("/");
+					const baseImageFileName = imagePathParts[imagePathParts.length - 1];
+					const sanitizedImageFileName = sentinize(baseImageFileName);
+					const imageTargetPath = path.join(this.settings.activeTargetFolder, this.settings.imageFolder, sanitizedImageFileName);
+
+					try {
+						const files = this.app.vault.getFiles();
+						// 먼저 경로를 포함해서 찾기 시도
+						let matchingFile = files.find((file) => {
+							const filePathLower = file.path.toLowerCase();
+							const imagePathLower = imagePath.toLowerCase();
+							return filePathLower === imagePathLower || filePathLower.endsWith(imagePathLower);
+						});
+
+						// 경로로 찾지 못한 경우 파일명만으로 찾기
+						if (!matchingFile) {
+							matchingFile = files.find((file) => {
+								const fileBaseName = path.basename(file.path);
+								return fileBaseName.toLowerCase() === baseImageFileName.toLowerCase();
+							});
+						}
+
+						if (matchingFile) {
+							const adapter = this.app.vault.adapter;
+							if (adapter instanceof FileSystemAdapter) {
+								const basePath = adapter.getBasePath();
+								const absoluteFilePath = path.join(basePath, matchingFile.path);
+								console.log(`Copying markdown image from: ${absoluteFilePath} to ${imageTargetPath}`);
+								await fs.copyFile(absoluteFilePath, imageTargetPath);
+								const newPath = `${this.settings.imageFolder}/${sanitizedImageFileName}`;
+								const width = existingWidth || "";
+								const replacement = width ? `![${altText}](${newPath}){:width="${width}px"}` : `![${altText}](${newPath})`;
+								line = line.replace(fullMatch, replacement);
+							} else {
+								console.error("FileSystemAdapter가 아닙니다.");
+							}
+						} else {
+							console.error(`마크다운 이미지 파일을 찾을 수 없습니다: ${imagePath}`);
+						}
+					} catch (error) {
+						console.error(`마크다운 이미지 복사 실패: ${error}`);
+						// 원본 유지
+					}
+				}
+
 				// Obsidian 링크 변환
 				line = line.replace(/\[\[([^\|\]]+)\|([^\]]+)\]\]/g, (match, link, displayName) => {
 					const sanitizedLink = sentinize(link);
