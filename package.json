@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-jekyll-exporter",
-	"version": "0.0.1",
+	"version": "1.0.45",
 	"description": "A plugin to export Obsidian notes to Jekyll blog posts",
 	"main": "main.js",
 	"scripts": {
