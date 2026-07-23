@@ -7,6 +7,7 @@ Obsidian의 마크다운 노트를 Jekyll 블로그 포스트로 변환하고 �
 -   Obsidian 마크다운 파일을 Jekyll 포스트 형식으로 변환
 -   파일 중복 시 처리 옵션 제공 (날짜/내용 덮어쓰기, 내용만 덮어쓰기)
 -   Front Matter 자동 생성 및 관리
+-   게시물별 고정 `post_id` 생성 및 원본/발행본 동기화
 -   위키링크(`[[링크]]`)를 마크다운 링크로 자동 변환
 -   이미지 링크 자동 변환 및 경로 관리
 -   다중 Jekyll 사이트 지원 (여러 대상 폴더 설정 가능)
@@ -14,11 +15,14 @@ Obsidian의 마크다운 노트를 Jekyll 블로그 포스트로 변환하고 �
 -   HTTP URL을 마크다운 링크로 자동 변환 (2024-12-11 추가)
 -   옵시디안 형식의 이미지 링크를 Jekyll 마크다운 엔진 형식으로 변환 - 이미지 크기 관련 (2024-12-15 추가)
 
-## 설치 방법
+## 설치 방법 (BRAT)
 
-1. Obsidian의 설정(Settings)에서 커뮤니티 플러그인을 엽니다
-2. "Jekyll Export"를 검색하여 설치합니다
-3. 플러그인을 활성화합니다
+1. Obsidian에 [BRAT](https://github.com/TfTHacker/obsidian42-brat)을 설치하고 활성화합니다
+2. BRAT 설정에서 **Add Beta plugin**을 선택합니다
+3. 저장소 주소 `https://github.com/Fred-Ko/obsidian-jekyll-exporter`를 입력합니다
+4. 설치된 **Jekyll Exporter** 플러그인을 활성화합니다
+
+BRAT은 GitHub 최신 릴리스의 `manifest.json`, `main.js`, `styles.css`를 받아 업데이트합니다.
 
 ## 설정 방법
 
@@ -80,7 +84,15 @@ Obsidian의 마크다운 노트를 Jekyll 블로그 포스트로 변환하고 �
 
 -   **날짜와 내용 덮어쓰기**: 파일을 완전히 새로 생성
 -   **내용만 덮어쓰기**: 기존 Front Matter 유지하고 내용만 업데이트
+-   **Front Matter만 덮어쓰기**: 기존 본문을 유지하고 Front Matter만 업데이트
 -   **취소**: 내보내기 취소
+
+### 게시물 ID 관리
+
+-   새 글을 처음 내보낼 때 UUID 형식의 `post_id`를 생성합니다
+-   생성한 `post_id`는 원본 Obsidian 노트와 Jekyll 발행본 양쪽에 기록됩니다
+-   다시 내보낼 때 한쪽에만 `post_id`가 있으면 기존 값을 복원해 사용합니다
+-   원본과 발행본의 `post_id`가 서로 다르면 잘못된 게시물을 덮어쓰지 않도록 내보내기를 중단합니다
 
 ### 이미지 처리
 
