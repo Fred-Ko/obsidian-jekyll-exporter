@@ -1,8 +1,82 @@
-/*
+.jekyll-settings {
+	max-width: 860px;
+	margin: 0 auto;
+	padding-bottom: 48px;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.jekyll-settings > h1 {
+	margin-bottom: 4px;
+}
 
-If your plugin does not need CSS, delete this file.
+.jekyll-settings-section {
+	margin-top: 24px;
+	padding: 18px 22px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	background: var(--background-secondary);
+}
 
-*/
+.jekyll-settings-section > h2 {
+	margin: 0 0 10px;
+	font-size: 1.15rem;
+}
+
+.jekyll-folder-list {
+	display: grid;
+	gap: 8px;
+	margin-bottom: 12px;
+}
+
+.jekyll-folder-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 8px 10px;
+	border-radius: 6px;
+	background: var(--background-primary);
+}
+
+.jekyll-folder-row code {
+	overflow-wrap: anywhere;
+}
+
+.jekyll-front-matter-template {
+	width: min(100%, 520px);
+	min-height: 150px;
+	resize: vertical;
+	font-family: var(--font-monospace);
+}
+
+.jekyll-overwrite-modal {
+	padding: 8px;
+}
+
+.jekyll-overwrite-description {
+	color: var(--text-muted);
+}
+
+.jekyll-overwrite-actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+	margin-top: 18px;
+}
+
+.jekyll-overwrite-actions button {
+	width: 100%;
+}
+
+.jekyll-is-hidden {
+	display: none !important;
+}
+
+@media (max-width: 640px) {
+	.jekyll-settings-section {
+		padding: 14px;
+	}
+
+	.jekyll-overwrite-actions {
+		grid-template-columns: 1fr;
+	}
+}

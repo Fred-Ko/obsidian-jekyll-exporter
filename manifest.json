@@ -1,10 +1,10 @@
 {
 	"id": "obsidian-jekyll-exporter",
 	"name": "Jekyll Exporter",
-	"version": "1.0.47",
-	"minAppVersion": "0.15.0",
+	"version": "2.0.0",
+	"minAppVersion": "1.11.4",
 	"description": "A plugin to export Obsidian notes to Jekyll blog posts",
-	"author": "Fredko",
-	"authorUrl": "https://github.com/fred-ko",
+	"author": "Fred-Ko",
+	"authorUrl": "https://github.com/Fred-Ko",
 	"isDesktopOnly": true
 }
